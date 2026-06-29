@@ -157,13 +157,20 @@ a {
   inset: 10px auto auto 12px;
   z-index: 20;
   display: inline-flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 1.3ch;
   max-width: calc(100vw - 24px);
   color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.72rem;
   font-weight: 700;
+}
+
+.prediction-edit-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 1ch;
+  min-width: 0;
 }
 
 .prediction-name-row {
@@ -187,6 +194,70 @@ a {
 }
 
 .prediction-name-row input:focus-visible {
+  outline: 1px solid var(--muted);
+  outline-offset: 2px;
+}
+
+.prediction-start-button {
+  width: 1.1rem;
+  height: 1.1rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.prediction-start-button:hover,
+.prediction-start-button:focus-visible {
+  color: #20f7f7;
+  outline: none;
+}
+
+.prediction-name-prompt {
+  display: inline-flex;
+  align-items: center;
+  gap: 1ch;
+  min-width: 0;
+}
+
+.prediction-name-prompt label {
+  display: inline-grid;
+  grid-template-columns: auto minmax(8ch, 18ch);
+  align-items: center;
+  gap: 1ch;
+  min-width: 0;
+}
+
+.prediction-name-prompt input,
+.prediction-name-prompt button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.prediction-name-prompt input {
+  min-width: 0;
+  outline: none;
+}
+
+.prediction-name-prompt button {
+  padding: 0;
+  cursor: pointer;
+}
+
+.prediction-name-prompt input:focus-visible,
+.prediction-name-prompt button:focus-visible {
+  color: #20f7f7;
   outline: 1px solid var(--muted);
   outline-offset: 2px;
 }
@@ -615,6 +686,42 @@ h1 {
     0 1px 1px rgba(0, 0, 0, 1),
     0 0 7px rgba(0, 0, 0, 0.95),
     0 0 13px rgba(32, 247, 247, 0.86);
+}
+
+.team-token-button.team-token-prediction-correct {
+  color: #92ffba;
+  border-color: rgba(146, 255, 186, 0.78);
+  background: rgba(6, 34, 22, 0.84);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.9),
+    0 0 9px rgba(34, 197, 94, 0.68);
+  text-shadow:
+    0 1px 1px rgba(0, 0, 0, 1),
+    0 0 8px rgba(34, 197, 94, 0.9);
+}
+
+.team-token-button.team-token-prediction-wrong {
+  color: #ff6b7f;
+  border-color: rgba(255, 65, 92, 0.82);
+  background: rgba(55, 6, 14, 0.86);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.9),
+    0 0 9px rgba(255, 41, 72, 0.62);
+  text-shadow:
+    0 1px 1px rgba(0, 0, 0, 1),
+    0 0 8px rgba(255, 41, 72, 0.82);
+}
+
+.team-token-button.team-token-actual-winner {
+  color: #92ffba;
+  border-color: rgba(146, 255, 186, 0.64);
+  background: rgba(6, 34, 22, 0.64);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.9),
+    0 0 7px rgba(34, 197, 94, 0.42);
+  text-shadow:
+    0 1px 1px rgba(0, 0, 0, 1),
+    0 0 7px rgba(34, 197, 94, 0.72);
 }
 
 .team-token,

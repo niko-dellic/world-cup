@@ -7,6 +7,7 @@ import {
   type BracketConnectorLayout,
   type BracketNodeLayout,
 } from "@/lib/bracket-layout";
+import { getTeamPredictionOutcome } from "@/lib/prediction-outcome";
 import type { DisplayMatch, PredictionPicks, Team } from "@/lib/types";
 
 type BracketBoardProps = {
@@ -134,10 +135,12 @@ function TerminalNode({
   onDeactivate: () => void;
   onPick: (teamId: string) => void;
 }) {
-  const displayedSelection = selectedTeamId ?? match.winnerTeamId;
+  const predictionTeamId = selectedTeamId;
+  const displayedSelection = predictionTeamId ?? match.winnerTeamId;
   const matchupNode = (
     <MatchupNode
       match={match}
+      predictionTeamId={predictionTeamId}
       selectedTeamId={displayedSelection}
       viewOnly={viewOnly}
       onPick={onPick}
@@ -183,11 +186,13 @@ function TerminalNode({
 
 function MatchupNode({
   match,
+  predictionTeamId,
   selectedTeamId,
   viewOnly,
   onPick,
 }: {
   match: DisplayMatch;
+  predictionTeamId: string | null;
   selectedTeamId: string | null;
   viewOnly: boolean;
   onPick: (teamId: string) => void;
@@ -195,14 +200,18 @@ function MatchupNode({
   return (
     <div className="outer-match" aria-label={`${match.roundName} match ${match.slot}`}>
       <TeamPickButton
+        match={match}
         team={match.displayHomeTeam}
+        predictionTeamId={predictionTeamId}
         selectedTeamId={selectedTeamId}
         locked={match.isLocked}
         viewOnly={viewOnly}
         onPick={onPick}
       />
       <TeamPickButton
+        match={match}
         team={match.displayAwayTeam}
+        predictionTeamId={predictionTeamId}
         selectedTeamId={selectedTeamId}
         locked={match.isLocked}
         viewOnly={viewOnly}
@@ -213,29 +222,45 @@ function MatchupNode({
 }
 
 function TeamPickButton({
+  match,
   team,
+  predictionTeamId,
   selectedTeamId,
   locked,
   viewOnly,
   onPick,
 }: {
+  match: DisplayMatch;
   team: Team | null;
+  predictionTeamId: string | null;
   selectedTeamId: string | null;
   locked: boolean;
   viewOnly: boolean;
   onPick: (teamId: string) => void;
 }) {
+  const outcome = getTeamPredictionOutcome({
+    status: match.status,
+    teamId: team?.id,
+    predictionTeamId,
+    winnerTeamId: match.winnerTeamId,
+  });
+  const teamLabel = team ? [team.name, outcome.label].filter(Boolean).join(", ") : "Unknown team";
+
   return (
     <button
       type="button"
-      className={clsx("team-token-button", team?.id === selectedTeamId && "team-token-selected")}
+      className={clsx(
+        "team-token-button",
+        team?.id === selectedTeamId && "team-token-selected",
+        outcome.classNames,
+      )}
       disabled={!team || viewOnly}
       aria-disabled={!team || locked || viewOnly}
       onClick={() => {
         if (team && !locked && !viewOnly) onPick(team.id);
       }}
-      aria-label={team ? team.name : "Unknown team"}
-      title={team?.name}
+      aria-label={teamLabel}
+      title={teamLabel}
     >
       {team ? <TeamToken team={team} /> : <span className="unknown-token">?</span>}
     </button>

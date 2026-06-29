@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { BracketBoard } from "@/components/BracketBoard";
 import { LiveFavicon } from "@/components/LiveFavicon";
@@ -18,10 +19,12 @@ const WorldCupScene = dynamic(
 
 const LOCAL_STORAGE_KEY = "world-cup-bracket-prediction-v2";
 const SEEDED_DEMO_NOW = new Date("2026-06-27T12:00:00.000Z");
+const EMPTY_PICKS: PredictionPicks = {};
 
 type LocalPrediction = {
   displayName?: string;
   picks?: PredictionPicks;
+  started?: boolean;
 };
 
 type PublicPrediction = {
@@ -31,23 +34,35 @@ type PublicPrediction = {
   updatedAt: string;
 };
 
+type PendingPick = {
+  matchId: string;
+  teamId: string;
+};
+
 const OWN_PREDICTION_ID = "self";
+const CURRENT_STANDINGS_ID = "current-standings";
 
 export function HomeDashboard({ initialBracket }: { initialBracket: BracketData }) {
   const [picks, setPicks] = useState<PredictionPicks>({});
-  const [displayName, setDisplayName] = useState("Anonymous");
+  const [displayName, setDisplayName] = useState("");
+  const [hasStartedPrediction, setHasStartedPrediction] = useState(false);
+  const [isNamePromptOpen, setIsNamePromptOpen] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [pendingPick, setPendingPick] = useState<PendingPick | null>(null);
   const [publicPredictions, setPublicPredictions] = useState<PublicPrediction[]>([]);
-  const [selectedPredictionId, setSelectedPredictionId] = useState(OWN_PREDICTION_ID);
+  const [selectedPredictionId, setSelectedPredictionId] = useState(CURRENT_STANDINGS_ID);
   const [predictionLoaded, setPredictionLoaded] = useState(false);
   const [remotePersistenceAvailable, setRemotePersistenceAvailable] = useState(isSupabaseConfigured);
   const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
   const predictionNow = initialBracket.source === "seeded" ? SEEDED_DEMO_NOW : undefined;
+  const isViewingCurrentStandings = selectedPredictionId === CURRENT_STANDINGS_ID;
   const selectedPublicPrediction =
-    selectedPredictionId === OWN_PREDICTION_ID
+    selectedPredictionId === OWN_PREDICTION_ID || isViewingCurrentStandings
       ? null
       : publicPredictions.find((prediction) => prediction.id === selectedPredictionId) ?? null;
-  const visiblePicks = selectedPublicPrediction?.picks ?? picks;
+  const visiblePicks = isViewingCurrentStandings ? EMPTY_PICKS : selectedPublicPrediction?.picks ?? picks;
   const isViewingPublicPrediction = Boolean(selectedPublicPrediction);
+  const isReadOnlyView = isViewingCurrentStandings || isViewingPublicPrediction;
 
   const displayMatches = useMemo(
     () => deriveDisplayMatches(initialBracket.matches, visiblePicks, predictionNow),
@@ -62,7 +77,13 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
 
     async function loadPrediction() {
       const local = readLocalPrediction();
-      if (local?.displayName) setDisplayName(local.displayName);
+      const localDisplayName = normalizeDisplayName(local?.displayName);
+      if (localDisplayName) {
+        setDisplayName(localDisplayName);
+        setHasStartedPrediction(true);
+      } else if (local?.started) {
+        setHasStartedPrediction(true);
+      }
       if (local?.picks) {
         setPicks(sanitizePicks(initialBracket.matches, local.picks, predictionNow));
       }
@@ -81,9 +102,15 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
       }
 
       try {
-        const hasSession = await ensureAnonymousSession(supabase);
-        if (!hasSession) {
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession();
+        if (sessionError) {
           if (!cancelled) setRemotePersistenceAvailable(false);
+          return;
+        }
+        if (!session) {
           return;
         }
 
@@ -92,8 +119,10 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
           const payload = (await response.json()) as {
             prediction?: LocalPrediction | null;
           };
-          if (payload.prediction?.displayName) {
-            setDisplayName(payload.prediction.displayName);
+          const remoteDisplayName = normalizeDisplayName(payload.prediction?.displayName);
+          if (remoteDisplayName) {
+            setDisplayName(remoteDisplayName);
+            setHasStartedPrediction(true);
           }
           if (payload.prediction?.picks) {
             setPicks(sanitizePicks(initialBracket.matches, payload.prediction.picks, predictionNow));
@@ -118,9 +147,11 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
   useEffect(() => {
     if (!predictionLoaded) return undefined;
 
-    const prediction = { displayName, picks };
+    const cleanDisplayName = normalizeDisplayName(displayName);
+    const prediction = { displayName: cleanDisplayName ?? undefined, picks, started: hasStartedPrediction };
     writeLocalPrediction(prediction);
 
+    if (!hasStartedPrediction || !cleanDisplayName) return undefined;
     if (!remotePersistenceAvailable) return undefined;
 
     let cancelled = false;
@@ -136,7 +167,7 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
       cancelled = true;
       window.clearTimeout(timeout);
     };
-  }, [displayName, picks, predictionLoaded, remotePersistenceAvailable]);
+  }, [displayName, hasStartedPrediction, picks, predictionLoaded, remotePersistenceAvailable]);
 
   useEffect(() => {
     let cancelled = false;
@@ -169,7 +200,45 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
   }, []);
 
   function handlePick(match: DisplayMatch, teamId: string) {
+    if (!hasStartedPrediction || !normalizeDisplayName(displayName)) {
+      openNamePrompt({ matchId: match.id, teamId });
+      return;
+    }
+
     setPicks((current) => applyPick(initialBracket.matches, current, match.id, teamId, predictionNow));
+  }
+
+  function handleStartPrediction() {
+    openNamePrompt(null);
+  }
+
+  function openNamePrompt(nextPendingPick: PendingPick | null) {
+    setPendingPick(nextPendingPick);
+    setSelectedPredictionId(OWN_PREDICTION_ID);
+    setNameDraft(normalizeDisplayName(displayName) ?? "");
+    setIsNamePromptOpen(true);
+  }
+
+  function submitNamePrompt(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextDisplayName = normalizeDisplayName(nameDraft);
+    if (!nextDisplayName) return;
+
+    setDisplayName(nextDisplayName);
+    setHasStartedPrediction(true);
+    setIsNamePromptOpen(false);
+    setSelectedPredictionId(OWN_PREDICTION_ID);
+
+    if (pendingPick) {
+      const { matchId, teamId } = pendingPick;
+      setPicks((current) => applyPick(initialBracket.matches, current, matchId, teamId, predictionNow));
+      setPendingPick(null);
+    }
+  }
+
+  function cancelNamePrompt() {
+    setIsNamePromptOpen(false);
+    setPendingPick(null);
   }
 
   return (
@@ -178,27 +247,62 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
       <WorldCupScene activeMatch={activeMatch} />
       <section className="dashboard-shell">
         <div className="prediction-toolbar">
-          <label className="prediction-name-row">
-            <span>name</span>
-            <input
-              type="text"
-              value={displayName}
-              maxLength={48}
-              aria-label="Leaderboard name"
-              spellCheck={false}
-              onChange={(event) => setDisplayName(event.target.value)}
-            />
-          </label>
           <PredictionViewerCombobox
             predictions={publicPredictions}
             selectedId={selectedPredictionId}
             onSelect={setSelectedPredictionId}
           />
+          <div className="prediction-edit-cluster">
+            {hasStartedPrediction ? (
+              <label className="prediction-name-row">
+                <span>name</span>
+                <input
+                  type="text"
+                  value={displayName}
+                  maxLength={48}
+                  aria-label="Leaderboard name"
+                  spellCheck={false}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                />
+              </label>
+            ) : (
+              <button
+                type="button"
+                className="prediction-start-button"
+                aria-label="Start making picks"
+                title="Start making picks"
+                onClick={handleStartPrediction}
+              >
+                +
+              </button>
+            )}
+            {isNamePromptOpen ? (
+              <form className="prediction-name-prompt" onSubmit={submitNamePrompt}>
+                <label>
+                  <span>name</span>
+                  <input
+                    type="text"
+                    value={nameDraft}
+                    maxLength={48}
+                    required
+                    autoFocus
+                    aria-label="Prediction name"
+                    spellCheck={false}
+                    onChange={(event) => setNameDraft(event.target.value)}
+                  />
+                </label>
+                <button type="submit">ok</button>
+                <button type="button" aria-label="Cancel name entry" onClick={cancelNamePrompt}>
+                  x
+                </button>
+              </form>
+            ) : null}
+          </div>
         </div>
         <BracketBoard
           matches={displayMatches}
           picks={visiblePicks}
-          viewOnly={isViewingPublicPrediction}
+          viewOnly={isReadOnlyView}
           activeMatchId={activeMatch?.id ?? null}
           onActivateMatch={setActiveMatchId}
           onClearActiveMatch={() => setActiveMatchId(null)}
@@ -221,7 +325,10 @@ function PredictionViewerCombobox({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const selectedPrediction = predictions.find((prediction) => prediction.id === selectedId);
-  const selectedLabel = selectedPrediction?.displayName ?? "my bracket";
+  const selectedLabel =
+    selectedId === CURRENT_STANDINGS_ID
+      ? "current standings"
+      : selectedPrediction?.displayName ?? "my bracket";
   const normalizedQuery = query.trim().toLowerCase();
   const filteredPredictions = normalizedQuery
     ? predictions.filter((prediction) => prediction.displayName.toLowerCase().includes(normalizedQuery))
@@ -274,6 +381,12 @@ function PredictionViewerCombobox({
               id={OWN_PREDICTION_ID}
               label="my bracket"
               selected={selectedId === OWN_PREDICTION_ID}
+              onSelect={selectPrediction}
+            />
+            <PredictionComboboxItem
+              id={CURRENT_STANDINGS_ID}
+              label="current standings"
+              selected={selectedId === CURRENT_STANDINGS_ID}
               onSelect={selectPrediction}
             />
             {filteredPredictions.length > 0 ? (
@@ -332,6 +445,11 @@ function readLocalPrediction(): LocalPrediction | null {
 
 function writeLocalPrediction(prediction: LocalPrediction) {
   window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(prediction));
+}
+
+function normalizeDisplayName(value: string | null | undefined) {
+  const trimmed = value?.trim().slice(0, 48) ?? "";
+  return trimmed || null;
 }
 
 async function saveRemotePrediction(prediction: LocalPrediction) {

@@ -14,6 +14,7 @@ import {
   Line as ThreeLine,
   LineBasicMaterial,
   Mesh,
+  PointLight,
   Points,
   SRGBColorSpace,
   ShaderMaterial,
@@ -31,6 +32,8 @@ type WorldCupSceneProps = {
 const FLAG_BACKDROP_Z = -1.65;
 const EXIT_ANIMATION_MS = 3000;
 const EFFECT_FADE_SECONDS = 0.5;
+const SPECKLE_COUNT = 620;
+const SPECKLE_LOOP_SECONDS = 240;
 
 export function WorldCupScene({ activeMatch }: WorldCupSceneProps) {
   const [renderMatch, setRenderMatch] = useState<DisplayMatch | null>(activeMatch);
@@ -66,10 +69,8 @@ export function WorldCupScene({ activeMatch }: WorldCupSceneProps) {
         {hasMatch ? (
           <group key={`${renderMatch!.id}-${leftTeam!.id}-${rightTeam!.id}`}>
             <MassiveFlagBackdrop leftTeam={leftTeam!} rightTeam={rightTeam!} active={isActive} />
-            <EnergyField intensity={isActive ? 1 : 0} />
             <ambientLight intensity={0.6} />
-            <pointLight position={[-2.5, 1.8, 3]} intensity={8} color="#38bdf8" />
-            <pointLight position={[2.5, -1.4, 3]} intensity={8} color="#67e8f9" />
+            <ElectricLights active={isActive} />
             <SeamLightning active={isActive} />
             <ElectricArcs leftTeam={leftTeam!} rightTeam={rightTeam!} active={isActive} />
           </group>
@@ -79,37 +80,32 @@ export function WorldCupScene({ activeMatch }: WorldCupSceneProps) {
   );
 }
 
-function EnergyField({ intensity }: { intensity: number }) {
-  const materialRef = useRef<ShaderMaterial>(null);
-  const transitionRef = useRef(createEffectTransition(intensity));
-  const uniforms = useMemo(
-    () => ({
-      uTime: { value: 0 },
-      uIntensity: { value: intensity },
-    }),
-    [],
-  );
+function ElectricLights({ active }: { active: boolean }) {
+  const leftLightRef = useRef<PointLight>(null);
+  const rightLightRef = useRef<PointLight>(null);
+  const intensityRef = useRef(createEffectTransition(active ? 1 : 0));
 
-  useFrame(({ clock }, delta) => {
-    const fieldIntensity = updateEffectTransition(transitionRef.current, intensity, delta);
-
-    uniforms.uTime.value = clock.elapsedTime;
-    uniforms.uIntensity.value = fieldIntensity;
+  useFrame((_, delta) => {
+    const intensity = updateEffectTransition(intensityRef.current, active ? 1 : 0, delta);
+    if (leftLightRef.current) leftLightRef.current.intensity = 8 * intensity;
+    if (rightLightRef.current) rightLightRef.current.intensity = 8 * intensity;
   });
 
   return (
-    <mesh position={[0, 0, -2]} scale={[15, 9, 1]}>
-      <planeGeometry args={[1, 1, 96, 96]} />
-      <shaderMaterial
-        ref={materialRef}
-        uniforms={uniforms}
-        vertexShader={energyVertexShader}
-        fragmentShader={energyFragmentShader}
-        side={DoubleSide}
-        transparent
-        depthWrite={false}
+    <>
+      <pointLight
+        ref={leftLightRef}
+        position={[-2.5, 1.8, 3]}
+        intensity={8 * intensityRef.current.value}
+        color="#38bdf8"
       />
-    </mesh>
+      <pointLight
+        ref={rightLightRef}
+        position={[2.5, -1.4, 3]}
+        intensity={8 * intensityRef.current.value}
+        color="#67e8f9"
+      />
+    </>
   );
 }
 
@@ -134,6 +130,7 @@ function MassiveFlagPanel({ team, side, active }: { team: Team; side: "left" | "
   const meshRef = useRef<Group>(null);
   const materialRef = useRef<ShaderMaterial>(null);
   const progressRef = useRef(0);
+  const effectIntensityRef = useRef(createEffectTransition(active ? 1 : 0));
   const texture = useFlagCoverTexture(team, side);
   const { camera, viewport } = useThree();
   const flagViewport = viewport.getCurrentViewport(camera, [0, 0, FLAG_BACKDROP_Z]);
@@ -147,6 +144,7 @@ function MassiveFlagPanel({ team, side, active }: { team: Team; side: "left" | "
       uTime: { value: 0 },
       uSide: { value: direction },
       uProgress: { value: 0 },
+      uEffectIntensity: { value: active ? 1 : 0 },
       uRepeat: { value: new Vector2(1, 1) },
       uOffset: { value: new Vector2(0, 0) },
     }),
@@ -162,6 +160,11 @@ function MassiveFlagPanel({ team, side, active }: { team: Team; side: "left" | "
 
   useFrame(({ clock }, delta) => {
     if (!meshRef.current) return;
+    const effectIntensity = updateEffectTransition(
+      effectIntensityRef.current,
+      active ? 1 : 0,
+      delta,
+    );
     const motion = active ? delta * 2.75 : -delta * 0.85;
     progressRef.current = Math.min(1, Math.max(0, progressRef.current + motion));
     const eased = easeSmooth(progressRef.current);
@@ -173,6 +176,7 @@ function MassiveFlagPanel({ team, side, active }: { team: Team; side: "left" | "
     if (materialRef.current) {
       materialRef.current.uniforms.uTime.value = clock.elapsedTime;
       materialRef.current.uniforms.uProgress.value = eased;
+      materialRef.current.uniforms.uEffectIntensity.value = effectIntensity;
       materialRef.current.uniforms.uRepeat.value.copy(texture.repeat);
       materialRef.current.uniforms.uOffset.value.copy(texture.offset);
     }
@@ -245,13 +249,17 @@ function SeamLightning({ active }: { active: boolean }) {
 
       lightning.branches.forEach((branch, index) => {
         const branchPoints = frameData.branches[index] ?? null;
-        branch.line.visible = Boolean(branchPoints);
-        branch.material.opacity = (branchPoints ? branchPoints.opacity : 0) * intensity;
+        branch.opacity = branchPoints ? branchPoints.opacity : 0;
+        branch.line.visible = branch.opacity > 0;
         if (branchPoints) {
           replaceLineGeometry(branch.line, branchPoints.points);
         }
       });
     }
+
+    lightning.branches.forEach((branch) => {
+      branch.material.opacity = branch.opacity * intensity;
+    });
   });
 
   return <primitive object={lightning.group} />;
@@ -318,8 +326,10 @@ function SpeckleField() {
 
   useFrame(({ clock }) => {
     if (!pointsRef.current) return;
-    pointsRef.current.rotation.z = clock.elapsedTime * 0.015;
-    pointsRef.current.rotation.y = Math.sin(clock.elapsedTime * 0.25) * 0.08;
+    const loopPhase = (clock.elapsedTime % SPECKLE_LOOP_SECONDS) / SPECKLE_LOOP_SECONDS;
+    const loopAngle = loopPhase * Math.PI * 2;
+    pointsRef.current.rotation.z = loopAngle;
+    pointsRef.current.rotation.y = Math.sin(loopAngle) * 0.08;
   });
 
   return (
@@ -517,6 +527,7 @@ type LightningObjects = {
   branches: Array<{
     line: ThreeLine;
     material: LineBasicMaterial;
+    opacity: number;
   }>;
 };
 
@@ -549,7 +560,7 @@ function createLightningObjects(): LightningObjects {
     const line = new ThreeLine(createLineGeometry(initialPoints), material);
     line.visible = false;
     group.add(line);
-    return { line, material };
+    return { line, material, opacity: 0 };
   });
 
   return {
@@ -809,19 +820,19 @@ function createArcLines(count: number, leftTeam: Team, rightTeam: Team) {
 }
 
 function createSpeckleGeometry() {
-  const count = 620;
-  const positions = new Float32Array(count * 3);
-  const colors = new Float32Array(count * 3);
+  const positions = new Float32Array(SPECKLE_COUNT * 3);
+  const colors = new Float32Array(SPECKLE_COUNT * 3);
   const left = new Color("#bae6fd");
   const right = new Color("#22d3ee");
   const accent = new Color("#ffffff");
 
-  for (let i = 0; i < count; i += 1) {
-    const radius = 1.2 + Math.random() * 4.8;
-    const angle = Math.random() * Math.PI * 2;
+  for (let i = 0; i < SPECKLE_COUNT; i += 1) {
+    const seed = i + 1;
+    const radius = 1.2 + hashNumber(seed * 17.13) * 4.8;
+    const angle = hashNumber(seed * 31.71) * Math.PI * 2;
     positions[i * 3] = Math.cos(angle) * radius;
     positions[i * 3 + 1] = Math.sin(angle) * radius * 0.58;
-    positions[i * 3 + 2] = (Math.random() - 0.5) * 1.6;
+    positions[i * 3 + 2] = (hashNumber(seed * 47.29) - 0.5) * 1.6;
 
     const color = i % 3 === 0 ? left : i % 3 === 1 ? right : accent;
     colors[i * 3] = color.r;
@@ -855,48 +866,6 @@ function roundRect(
   context.quadraticCurveTo(x, y, x + radius, y);
   context.closePath();
 }
-
-const energyVertexShader = `
-  varying vec2 vUv;
-  void main() {
-    vUv = uv;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
-
-const energyFragmentShader = `
-  uniform float uTime;
-  uniform float uIntensity;
-  varying vec2 vUv;
-
-  float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-  }
-
-  float noise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    float a = hash(i);
-    float b = hash(i + vec2(1.0, 0.0));
-    float c = hash(i + vec2(0.0, 1.0));
-    float d = hash(i + vec2(1.0, 1.0));
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
-  }
-
-  void main() {
-    vec2 uv = vUv;
-    vec2 centered = uv - 0.5;
-    float seam = pow(1.0 - smoothstep(0.0, 0.46, abs(centered.x)), 2.2);
-    float radial = 1.0 - smoothstep(0.05, 0.68, length(centered));
-    float wave = noise(uv * 8.0 + vec2(uTime * 0.7, -uTime * 0.35));
-    float lightning = smoothstep(0.72, 0.98, sin((uv.y + wave * 0.26) * 34.0 + uTime * 6.0));
-    vec3 color = vec3(0.02, 0.16, 0.32) * seam * 0.44;
-    color += vec3(0.02, 0.55, 0.9) * radial * seam * 0.36;
-    color += vec3(0.35, 0.95, 1.0) * lightning * seam * 0.28;
-    gl_FragColor = vec4(color, seam * 0.48 * uIntensity);
-  }
-`;
 
 const lightningRibbonVertexShader = `
   attribute float aSide;
@@ -996,6 +965,7 @@ const flagFragmentShader = `
   uniform float uTime;
   uniform float uSide;
   uniform float uProgress;
+  uniform float uEffectIntensity;
   varying vec2 vUv;
   varying float vWave;
   ${seamShapeGlsl}
@@ -1013,9 +983,10 @@ const flagFragmentShader = `
     float edgeGlow = 1.0 - smoothstep(0.0, featherWidth * 1.65, abs(seamDistance - cutWidth));
     float smokeFade = 0.78 + edgeNoise * 0.22;
     float gustShade = 1.0 + vWave * 2.2;
+    float electricEdge = edgeGlow * 0.42 * uEffectIntensity;
     flag.rgb *= gustShade;
-    flag.rgb += vec3(0.08, 0.92, 1.0) * edgeGlow * 0.42 * uProgress;
-    flag.a *= mix(lightningMask, lightningMask * smokeFade, edgeGlow * 0.42) * uProgress;
+    flag.rgb += vec3(0.08, 0.92, 1.0) * electricEdge * uProgress;
+    flag.a *= mix(lightningMask, lightningMask * smokeFade, electricEdge) * uProgress;
     gl_FragColor = flag;
   }
 `;

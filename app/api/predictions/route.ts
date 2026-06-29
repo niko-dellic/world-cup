@@ -62,7 +62,10 @@ export async function PUT(request: NextRequest) {
     picks?: Record<string, string | null | undefined>;
   };
 
-  const displayName = body.displayName?.trim().slice(0, 48) || "Anonymous";
+  const displayName = body.displayName?.trim().slice(0, 48);
+  if (!displayName) {
+    return NextResponse.json({ error: "Display name is required" }, { status: 400 });
+  }
   const picks = Object.fromEntries(
     Object.entries(body.picks ?? {}).filter(([, value]) => typeof value === "string" || value === null),
   );
