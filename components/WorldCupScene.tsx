@@ -80,6 +80,7 @@ export function WorldCupScene({ activeMatch }: WorldCupSceneProps) {
 
 function EnergyField({ intensity }: { intensity: number }) {
   const materialRef = useRef<ShaderMaterial>(null);
+  const intensityRef = useRef(intensity);
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },
@@ -88,9 +89,13 @@ function EnergyField({ intensity }: { intensity: number }) {
     [],
   );
 
-  useFrame(({ clock }) => {
+  useFrame(({ clock }, delta) => {
+    const blend = intensity > 0 ? 1 - Math.pow(0.0008, delta) : 1 - Math.pow(0.22, delta);
+    intensityRef.current += (intensity - intensityRef.current) * blend;
+    const easedIntensity = easeSmooth(clamp(intensityRef.current, 0, 1));
+
     uniforms.uTime.value = clock.elapsedTime;
-    uniforms.uIntensity.value += (intensity - uniforms.uIntensity.value) * (intensity > 0 ? 0.08 : 0.04);
+    uniforms.uIntensity.value = easedIntensity;
   });
 
   return (
@@ -206,7 +211,7 @@ function SeamLightning({ active }: { active: boolean }) {
     const time = clock.elapsedTime;
     const motion = getLightningMotion(time);
     const targetIntensity = active ? 1 : 0;
-    const blend = active ? 1 - Math.pow(0.0008, delta) : 1 - Math.pow(0.02, delta);
+    const blend = active ? 1 - Math.pow(0.0008, delta) : 1 - Math.pow(0.18, delta);
     intensityRef.current += (targetIntensity - intensityRef.current) * blend;
 
     lightning.group.rotation.z = -0.2 + motion.shear * 0.16 + Math.sin(time * 3.7) * 0.018;
@@ -242,7 +247,7 @@ function SeamLightning({ active }: { active: boolean }) {
 
       lightning.branches.forEach((branch, index) => {
         const branchPoints = frameData.branches[index] ?? null;
-        branch.line.visible = Boolean(branchPoints) && intensityRef.current > 0.04;
+        branch.line.visible = Boolean(branchPoints);
         branch.material.opacity = (branchPoints ? branchPoints.opacity : 0) * intensityRef.current;
         if (branchPoints) {
           replaceLineGeometry(branch.line, branchPoints.points);
@@ -264,10 +269,8 @@ function ElectricArcs({
   active: boolean;
 }) {
   const groupRef = useRef<Group>(null);
-  const lines = useMemo(
-    () => createArcLines(active ? 11 : 5, leftTeam, rightTeam, active),
-    [active, leftTeam, rightTeam],
-  );
+  const intensityRef = useRef(active ? 1 : 0);
+  const lines = useMemo(() => createArcLines(11, leftTeam, rightTeam), [leftTeam, rightTeam]);
 
   useEffect(() => {
     return () => {
@@ -282,11 +285,21 @@ function ElectricArcs({
     };
   }, [lines]);
 
-  useFrame(({ clock }) => {
+  useFrame(({ clock }, delta) => {
     if (!groupRef.current) return;
+    const targetIntensity = active ? 1 : 0;
+    const blend = active ? 1 - Math.pow(0.0008, delta) : 1 - Math.pow(0.2, delta);
+    intensityRef.current += (targetIntensity - intensityRef.current) * blend;
+    const intensity = easeSmooth(clamp(intensityRef.current, 0, 1));
+
     groupRef.current.rotation.z = -0.34 + Math.sin(clock.elapsedTime * 1.8) * 0.04;
-    groupRef.current.children.forEach((child, index) => {
-      child.visible = Math.sin(clock.elapsedTime * 6 + index) > (active ? -0.35 : 0.35);
+    lines.forEach((line, index) => {
+      const wave = Math.sin(clock.elapsedTime * 6 + index);
+      const pulse = 0.38 + ((wave + 1) / 2) * 0.62;
+      line.visible = true;
+      if (line.material instanceof LineBasicMaterial) {
+        line.material.opacity = 0.82 * pulse * intensity;
+      }
     });
   });
 
@@ -740,7 +753,7 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-function createArcLines(count: number, leftTeam: Team, rightTeam: Team, active: boolean) {
+function createArcLines(count: number, leftTeam: Team, rightTeam: Team) {
   return Array.from({ length: count }, (_, index) => {
     const points: number[] = [];
     const segments = 28;
@@ -762,8 +775,9 @@ function createArcLines(count: number, leftTeam: Team, rightTeam: Team, active: 
     const material = new LineBasicMaterial({
       color: index % 3 === 0 ? "#f8fdff" : index % 3 === 1 ? "#67e8f9" : "#2563eb",
       transparent: true,
-      opacity: active ? 0.82 : 0.32,
+      opacity: 0,
       blending: AdditiveBlending,
+      depthWrite: false,
     });
     return new ThreeLine(geometry, material);
   });

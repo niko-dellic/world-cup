@@ -28,6 +28,7 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
   const [picks, setPicks] = useState<PredictionPicks>({});
   const [displayName, setDisplayName] = useState("Anonymous");
   const [predictionLoaded, setPredictionLoaded] = useState(false);
+  const [remotePersistenceAvailable, setRemotePersistenceAvailable] = useState(isSupabaseConfigured);
   const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
   const predictionNow = initialBracket.source === "seeded" ? SEEDED_DEMO_NOW : undefined;
 
@@ -50,24 +51,23 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
       }
 
       if (!isSupabaseConfigured()) {
+        if (!cancelled) setRemotePersistenceAvailable(false);
         if (!cancelled) setPredictionLoaded(true);
         return;
       }
 
       const supabase = getBrowserSupabaseClient();
       if (!supabase) {
+        if (!cancelled) setRemotePersistenceAvailable(false);
         if (!cancelled) setPredictionLoaded(true);
         return;
       }
 
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        if (!session) {
-          const { error } = await supabase.auth.signInAnonymously();
-          if (error) return;
+        const hasSession = await ensureAnonymousSession(supabase);
+        if (!hasSession) {
+          if (!cancelled) setRemotePersistenceAvailable(false);
+          return;
         }
 
         const response = await fetch("/api/predictions", { cache: "no-store" });
@@ -104,14 +104,22 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
     const prediction = { displayName, picks };
     writeLocalPrediction(prediction);
 
-    if (!isSupabaseConfigured()) return undefined;
+    if (!remotePersistenceAvailable) return undefined;
 
+    let cancelled = false;
     const timeout = window.setTimeout(() => {
-      void saveRemotePrediction(prediction);
+      void saveRemotePrediction(prediction).then((saved) => {
+        if (!saved && !cancelled) {
+          setRemotePersistenceAvailable(false);
+        }
+      });
     }, 350);
 
-    return () => window.clearTimeout(timeout);
-  }, [displayName, picks, predictionLoaded]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [displayName, picks, predictionLoaded, remotePersistenceAvailable]);
 
   function handlePick(match: DisplayMatch, teamId: string) {
     setPicks((current) => applyPick(initialBracket.matches, current, match.id, teamId, predictionNow));
@@ -122,6 +130,17 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
       <LiveFavicon active={hasLiveMatch} />
       <WorldCupScene activeMatch={activeMatch} />
       <section className="dashboard-shell">
+        <label className="prediction-name-row">
+          <span>name</span>
+          <input
+            type="text"
+            value={displayName}
+            maxLength={48}
+            aria-label="Leaderboard name"
+            spellCheck={false}
+            onChange={(event) => setDisplayName(event.target.value)}
+          />
+        </label>
         <BracketBoard
           matches={displayMatches}
           picks={picks}
@@ -150,26 +169,36 @@ function writeLocalPrediction(prediction: LocalPrediction) {
 
 async function saveRemotePrediction(prediction: LocalPrediction) {
   const supabase = getBrowserSupabaseClient();
-  if (!supabase) return;
+  if (!supabase) return false;
 
   try {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    const hasSession = await ensureAnonymousSession(supabase);
+    if (!hasSession) return false;
 
-    if (!session) {
-      const { error } = await supabase.auth.signInAnonymously();
-      if (error) return;
-    }
-
-    await fetch("/api/predictions", {
+    const response = await fetch("/api/predictions", {
       method: "PUT",
       headers: {
         "content-type": "application/json",
       },
       body: JSON.stringify(prediction),
     });
+
+    return response.ok;
   } catch {
     // Local picks remain saved even when remote fantasy persistence is unavailable.
+    return false;
   }
+}
+
+async function ensureAnonymousSession(supabase: NonNullable<ReturnType<typeof getBrowserSupabaseClient>>) {
+  const {
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
+
+  if (sessionError) return false;
+  if (session) return true;
+
+  const { error } = await supabase.auth.signInAnonymously();
+  return !error;
 }

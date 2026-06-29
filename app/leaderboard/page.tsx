@@ -36,7 +36,7 @@ export default async function LeaderboardPage() {
                       correct {entry.correctPicks}
                       {entry.possiblePoints > 0 ? `/${entry.possiblePoints}` : ""}
                     </span>
-                    <span>{entry.championPick?.name ?? "champion pending"}</span>
+                    {entry.championPick ? <span>champion {entry.championPick.name}</span> : null}
                   </div>
                 </div>
               </li>

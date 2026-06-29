@@ -26,7 +26,7 @@ Without Supabase env vars the app runs from the checked-in 2026 knockout graph a
 
 ## Database
 
-Apply the SQL files in `supabase/migrations/` to a Supabase project in order, then enable anonymous auth in Supabase Auth settings.
+Apply the SQL files in `supabase/migrations/` to a Supabase project in order, then enable anonymous auth in Supabase Auth settings. In the Supabase dashboard, turn on anonymous sign-ins under Authentication settings/providers; otherwise `signInAnonymously()` returns a `422` from `/auth/v1/signup`.
 
 ## Refreshing Bracket Data
 
@@ -50,4 +50,7 @@ The workflow can also be run manually from the Actions tab.
 npm run test
 npm run typecheck
 npm run build
+npm run reset:leaderboard
 ```
+
+`npm run reset:leaderboard` deletes rows from `prediction_brackets` using `SUPABASE_SERVICE_ROLE_KEY`.
