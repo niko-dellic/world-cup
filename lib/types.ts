@@ -28,13 +28,19 @@ export type Team = {
 export type Match = {
   id: string;
   providerId?: string;
+  matchNumber?: number;
   round: BracketRound;
   roundName: string;
   slot: number;
+  visualSlot?: number;
   kickoffTime: string | null;
   status: MatchStatus;
   homeTeam: Team | null;
   awayTeam: Team | null;
+  homeSourceMatchId?: string | null;
+  awaySourceMatchId?: string | null;
+  homeSourceLabel?: string | null;
+  awaySourceLabel?: string | null;
   homeScore: number | null;
   awayScore: number | null;
   winnerTeamId: string | null;
@@ -42,7 +48,7 @@ export type Match = {
 };
 
 export type BracketData = {
-  source: "fotmob" | "seeded" | "supabase";
+  source: "fotmob" | "seeded" | "static" | "supabase";
   refreshedAt: string;
   matches: Match[];
 };

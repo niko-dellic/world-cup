@@ -94,6 +94,8 @@ function ConnectorCell({ connector }: { connector: BracketConnectorLayout }) {
       data-stage={connector.stage}
       data-target-slot={connector.targetMatchSlot}
       data-source-slots={connector.sourceMatchSlots.join(",")}
+      data-target-match-id={connector.targetMatchId}
+      data-source-match-ids={connector.sourceMatchIds.join(",")}
       aria-hidden="true"
     >
       {connector.kind === "merge" ? (
@@ -144,6 +146,8 @@ function TerminalNode({
       data-round={layout.round}
       data-slot={layout.slot}
       data-local-slot={layout.localSlot}
+      data-match-id={match.id}
+      data-match-number={match.matchNumber}
       onMouseEnter={onActivate}
       onPointerEnter={onActivate}
       onMouseMove={onActivate}

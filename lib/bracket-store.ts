@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { BracketData, Match, PredictionBracket, Team } from "@/lib/types";
-import { createSeedBracket } from "@/lib/seed-data";
+import { createWorldCup2026Bracket } from "@/lib/seed-data";
 import { fetchWorldCupBracket } from "@/lib/providers/fotmob";
 import { createSupabaseAdminClient, createSupabaseReadClient } from "@/lib/supabase/server";
 
@@ -18,13 +18,19 @@ type TeamRow = {
 type MatchRow = {
   id: string;
   provider_id: string | null;
+  match_number: number | null;
   round: Match["round"];
   round_name: string;
   slot: number;
+  visual_slot: number | null;
   kickoff_time: string | null;
   status: Match["status"];
   home_team_id: string | null;
   away_team_id: string | null;
+  home_source_match_id: string | null;
+  away_source_match_id: string | null;
+  home_source_label: string | null;
+  away_source_label: string | null;
   home_score: number | null;
   away_score: number | null;
   winner_team_id: string | null;
@@ -41,7 +47,7 @@ type PredictionRow = {
 
 export async function getBracketData(): Promise<BracketData> {
   const supabase = createSupabaseReadClient();
-  if (!supabase) return createSeedBracket();
+  if (!supabase) return createWorldCup2026Bracket();
 
   const [{ data: teams, error: teamsError }, { data: matches, error: matchesError }] =
     await Promise.all([
@@ -50,7 +56,7 @@ export async function getBracketData(): Promise<BracketData> {
     ]);
 
   if (teamsError || matchesError || !matches?.length) {
-    return createSeedBracket();
+    return createWorldCup2026Bracket();
   }
 
   const teamById = new Map((teams as TeamRow[]).map((team) => [team.id, rowToTeam(team)]));
@@ -60,6 +66,10 @@ export async function getBracketData(): Promise<BracketData> {
       if (a.round === b.round) return a.slot - b.slot;
       return roundSort(a.round) - roundSort(b.round);
     });
+
+  if (!hasVisibleWorldCupGraph(normalizedMatches)) {
+    return createWorldCup2026Bracket();
+  }
 
   return {
     source: "supabase",
@@ -101,13 +111,19 @@ export async function persistBracketData(bracket: BracketData) {
     bracket.matches.map((match) => ({
       id: match.id,
       provider_id: match.providerId ?? null,
+      match_number: match.matchNumber ?? null,
       round: match.round,
       round_name: match.roundName,
       slot: match.slot,
+      visual_slot: match.visualSlot ?? match.slot,
       kickoff_time: match.kickoffTime,
       status: match.status,
       home_team_id: match.homeTeam?.id ?? null,
       away_team_id: match.awayTeam?.id ?? null,
+      home_source_match_id: match.homeSourceMatchId ?? null,
+      away_source_match_id: match.awaySourceMatchId ?? null,
+      home_source_label: match.homeSourceLabel ?? null,
+      away_source_label: match.awaySourceLabel ?? null,
       home_score: match.homeScore,
       away_score: match.awayScore,
       winner_team_id: match.winnerTeamId,
@@ -177,13 +193,19 @@ function rowToMatch(row: MatchRow, teamById: Map<string, Team>): Match {
   return {
     id: row.id,
     providerId: row.provider_id ?? undefined,
+    matchNumber: row.match_number ?? undefined,
     round: row.round,
     roundName: row.round_name,
     slot: row.slot,
+    visualSlot: row.visual_slot ?? row.slot,
     kickoffTime: row.kickoff_time,
     status: row.status,
     homeTeam: row.home_team_id ? teamById.get(row.home_team_id) ?? null : null,
     awayTeam: row.away_team_id ? teamById.get(row.away_team_id) ?? null : null,
+    homeSourceMatchId: row.home_source_match_id,
+    awaySourceMatchId: row.away_source_match_id,
+    homeSourceLabel: row.home_source_label,
+    awaySourceLabel: row.away_source_label,
     homeScore: row.home_score,
     awayScore: row.away_score,
     winnerTeamId: row.winner_team_id,
@@ -199,4 +221,13 @@ function roundSort(round: Match["round"]) {
     semifinals: 3,
     final: 4,
   }[round];
+}
+
+function hasVisibleWorldCupGraph(matches: Match[]) {
+  const expectedMatchNumbers = Array.from({ length: 32 }, (_, index) => index + 73).filter(
+    (matchNumber) => matchNumber !== 103,
+  );
+  const storedMatchNumbers = new Set(matches.map((match) => match.matchNumber));
+
+  return expectedMatchNumbers.every((matchNumber) => storedMatchNumbers.has(matchNumber));
 }

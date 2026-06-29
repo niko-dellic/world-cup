@@ -14,6 +14,14 @@
   --shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
 }
 
+@font-face {
+  font-family: "Goozette";
+  src: url("/fonts/Goozette.otf") format("opentype");
+  font-display: swap;
+  font-style: normal;
+  font-weight: 400;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -789,61 +797,183 @@ h1 {
 }
 
 .leaderboard-shell {
-  padding-top: clamp(30px, 7vw, 72px);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  width: min(760px, 100%);
+  min-height: 100svh;
+  padding: clamp(28px, 6vw, 64px);
 }
 
-.leaderboard-table-wrap,
-.empty-state {
-  margin-top: 24px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(12, 18, 26, 0.72);
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(18px);
+.leaderboard-page {
+  padding-top: 0;
+  overflow: hidden;
+  background: #000;
 }
 
-.leaderboard-table-wrap {
-  overflow-x: auto;
+.leaderboard-page::before {
+  content: none;
 }
 
-.leaderboard-table {
-  width: 100%;
-  min-width: 680px;
-  border-collapse: collapse;
+.leaderboard-topline {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  margin-bottom: 20px;
 }
 
-.leaderboard-table th,
-.leaderboard-table td {
-  padding: 16px;
-  border-bottom: 1px solid var(--line);
-  text-align: left;
+.leaderboard-title {
+  font-family: "Goozette", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: clamp(2rem, 8vw, 4rem);
+  font-weight: 400;
+  line-height: 1;
+  color: var(--text);
+  text-shadow: none;
 }
 
-.leaderboard-table th {
-  color: var(--muted);
-  font-size: 0.78rem;
-  text-transform: uppercase;
-}
-
-.leaderboard-table td {
-  font-weight: 800;
-}
-
-.empty-state {
+.make-picks-button {
   display: grid;
-  justify-items: start;
-  gap: 14px;
-  padding: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  text-shadow: none;
+  box-shadow: none;
 }
 
-.empty-state svg {
-  width: 34px;
-  height: 34px;
-  color: var(--gold);
+.make-picks-button:hover,
+.make-picks-button:focus-visible {
+  color: var(--muted);
+  outline: none;
 }
 
-.empty-state h2 {
-  font-size: 1.15rem;
+.lofi-leaderboard,
+.leaderboard-empty {
+  position: relative;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+.lofi-leaderboard {
+  display: grid;
+  gap: 0;
+  max-height: min(74svh, 620px);
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.lofi-leaderboard::before,
+.leaderboard-empty::before {
+  content: none;
+}
+
+.lofi-entry {
+  position: relative;
+  display: grid;
+  grid-template-columns: 4ch minmax(0, 1fr);
+  gap: 1ch;
+  min-height: 0;
+  padding: 2px 0;
+  border-bottom: 0;
+}
+
+.lofi-entry:last-child {
+  border-bottom: 0;
+}
+
+.lofi-entry:hover {
+  background: transparent;
+}
+
+.lofi-rank {
+  color: var(--muted);
+  font-size: 0.92rem;
+  font-weight: 400;
+  text-shadow: none;
+}
+
+.lofi-entry-body {
+  min-width: 0;
+}
+
+.lofi-scoreline {
+  display: flex;
+  align-items: baseline;
+  gap: 1ch;
+  min-width: 0;
+}
+
+.lofi-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lofi-ellipsis {
+  flex: 1 1 auto;
+  min-width: 2ch;
+  overflow: hidden;
+  transform: none;
+}
+
+.lofi-ellipsis::before {
+  content: "................................................................................................................................................";
+  display: block;
+  color: var(--muted);
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.lofi-score {
+  min-width: 3ch;
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 400;
+  text-align: right;
+  text-shadow: none;
+}
+
+.lofi-entry-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 1ch;
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 400;
+  text-transform: none;
+}
+
+.leaderboard-empty {
+  display: block;
+  min-height: 0;
+  padding: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  font-weight: 400;
+  text-transform: none;
 }
 
 @media (max-width: 860px) {
@@ -861,7 +991,8 @@ h1 {
     padding-top: 58px;
   }
 
-  .home-page {
+  .home-page,
+  .leaderboard-page {
     padding-top: 0;
   }
 

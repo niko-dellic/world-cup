@@ -34,9 +34,11 @@ export type BracketConnectorLayout = {
   sourceRound: BracketRound;
   sourceLocalSlots: number[];
   sourceMatchSlots: number[];
+  sourceMatchIds: string[];
   targetRound: BracketRound;
   targetLocalSlot: number;
   targetMatchSlot: number;
+  targetMatchId: string;
 };
 
 export type BracketGridLayout = {
@@ -46,8 +48,12 @@ export type BracketGridLayout = {
 
 type MatchLike = {
   id: string;
+  matchNumber?: number;
   round: BracketRound;
   slot: number;
+  visualSlot?: number;
+  homeSourceMatchId?: string | null;
+  awaySourceMatchId?: string | null;
 };
 
 type SideRound = Exclude<BracketRound, "final">;
@@ -91,34 +97,12 @@ const CONNECTOR_COLUMNS: Record<BracketSide, Record<BracketConnectorStage, strin
   },
 };
 
-const MERGE_STAGES: Array<{
-  stage: Exclude<BracketConnectorStage, "semifinals-to-final">;
-  sourceRound: SideRound;
-  targetRound: SideRound;
-}> = [
-  {
-    stage: "round-of-32-to-round-of-16",
-    sourceRound: "round-of-32",
-    targetRound: "round-of-16",
-  },
-  {
-    stage: "round-of-16-to-quarterfinals",
-    sourceRound: "round-of-16",
-    targetRound: "quarterfinals",
-  },
-  {
-    stage: "quarterfinals-to-semifinals",
-    sourceRound: "quarterfinals",
-    targetRound: "semifinals",
-  },
-];
-
 export function buildBracketGridLayout(matches: MatchLike[]): BracketGridLayout {
   return {
     nodes: matches
       .map(getNodeLayout)
       .filter((layout): layout is BracketNodeLayout => Boolean(layout)),
-    connectors: buildConnectorLayouts(),
+    connectors: buildConnectorLayouts(matches),
   };
 }
 
@@ -138,7 +122,7 @@ export function getNodeLayout(match: MatchLike): BracketNodeLayout | null {
     };
   }
 
-  const sideSlot = getSideSlot(match.round, match.slot);
+  const sideSlot = getSideSlot(match.round, match.visualSlot ?? match.slot);
   if (!sideSlot) return null;
 
   const rows = getRows(match.round, sideSlot.localSlot);
@@ -156,56 +140,84 @@ export function getNodeLayout(match: MatchLike): BracketNodeLayout | null {
   };
 }
 
-export function buildConnectorLayouts(): BracketConnectorLayout[] {
-  return (["left", "right"] as const).flatMap((side) => [
-    ...buildSideMergeConnectors(side),
-    buildSemifinalToFinalConnector(side),
-  ]);
-}
+export function buildConnectorLayouts(matches: MatchLike[]): BracketConnectorLayout[] {
+  const matchesById = new Map(matches.map((match) => [match.id, match]));
+  const layoutsById = new Map(
+    matches
+      .map((match) => [match.id, getNodeLayout(match)] as const)
+      .filter((entry): entry is readonly [string, BracketNodeLayout] => Boolean(entry[1])),
+  );
+  const connectors: BracketConnectorLayout[] = [];
 
-function buildSideMergeConnectors(side: BracketSide): BracketConnectorLayout[] {
-  return MERGE_STAGES.flatMap(({ stage, sourceRound, targetRound }) => {
-    const targetCount = LOCAL_SLOT_COUNT[targetRound];
+  matches.forEach((targetMatch) => {
+    const targetLayout = layoutsById.get(targetMatch.id);
+    if (!targetLayout) return;
 
-    return Array.from({ length: targetCount }, (_, index) => {
-      const targetLocalSlot = index + 1;
-      const sourceLocalSlots = [targetLocalSlot * 2 - 1, targetLocalSlot * 2];
-      const rows = getRows(targetRound, targetLocalSlot);
+    const sourceIds = [targetMatch.homeSourceMatchId, targetMatch.awaySourceMatchId].filter(
+      (sourceId): sourceId is string => Boolean(sourceId),
+    );
+    if (sourceIds.length !== 2) return;
 
-      return {
-        key: `${side}-${stage}-${targetLocalSlot}`,
-        side,
-        kind: "merge" as const,
-        stage,
-        column: CONNECTOR_COLUMNS[side][stage],
-        ...rows,
-        sourceRound,
-        sourceLocalSlots,
-        sourceMatchSlots: sourceLocalSlots.map((slot) => toGlobalSlot(side, sourceRound, slot)),
-        targetRound,
-        targetLocalSlot,
-        targetMatchSlot: toGlobalSlot(side, targetRound, targetLocalSlot),
-      };
+    const sourceMatches = sourceIds.map((sourceId) => matchesById.get(sourceId)).filter(Boolean) as MatchLike[];
+    const sourceLayouts = sourceIds.map((sourceId) => layoutsById.get(sourceId)).filter(Boolean) as BracketNodeLayout[];
+    if (sourceMatches.length !== 2 || sourceLayouts.length !== 2) return;
+
+    if (targetMatch.round === "final") {
+      sourceMatches.forEach((sourceMatch, index) => {
+        const sourceLayout = sourceLayouts[index];
+        if (sourceLayout.side === "center") return;
+
+        connectors.push({
+          key: `${sourceLayout.side}-semifinals-to-final-${sourceMatch.id}`,
+          side: sourceLayout.side,
+          kind: "single",
+          stage: "semifinals-to-final",
+          column: CONNECTOR_COLUMNS[sourceLayout.side]["semifinals-to-final"],
+          rowStart: 1,
+          rowSpan: ROW_COUNT,
+          sourceRound: sourceMatch.round,
+          sourceLocalSlots: [sourceLayout.localSlot],
+          sourceMatchSlots: [sourceMatch.matchNumber ?? sourceMatch.slot],
+          sourceMatchIds: [sourceMatch.id],
+          targetRound: targetMatch.round,
+          targetLocalSlot: targetLayout.localSlot,
+          targetMatchSlot: targetMatch.matchNumber ?? targetMatch.slot,
+          targetMatchId: targetMatch.id,
+        });
+      });
+      return;
+    }
+
+    if (targetLayout.side === "center") return;
+    if (!sourceLayouts.every((layout) => layout.side === targetLayout.side)) return;
+
+    const stage = getConnectorStage(sourceMatches[0].round, targetMatch.round);
+    if (!stage) return;
+
+    connectors.push({
+      key: `${targetLayout.side}-${stage}-${targetMatch.id}`,
+      side: targetLayout.side,
+      kind: "merge",
+      stage,
+      column: CONNECTOR_COLUMNS[targetLayout.side][stage],
+      rowStart: targetLayout.rowStart,
+      rowSpan: targetLayout.rowSpan,
+      sourceRound: sourceMatches[0].round,
+      sourceLocalSlots: sourceLayouts.map((layout) => layout.localSlot),
+      sourceMatchSlots: sourceMatches.map((match) => match.matchNumber ?? match.slot),
+      sourceMatchIds: sourceMatches.map((match) => match.id),
+      targetRound: targetMatch.round,
+      targetLocalSlot: targetLayout.localSlot,
+      targetMatchSlot: targetMatch.matchNumber ?? targetMatch.slot,
+      targetMatchId: targetMatch.id,
     });
   });
-}
 
-function buildSemifinalToFinalConnector(side: BracketSide): BracketConnectorLayout {
-  return {
-    key: `${side}-semifinals-to-final-1`,
-    side,
-    kind: "single",
-    stage: "semifinals-to-final",
-    column: CONNECTOR_COLUMNS[side]["semifinals-to-final"],
-    rowStart: 1,
-    rowSpan: ROW_COUNT,
-    sourceRound: "semifinals",
-    sourceLocalSlots: [1],
-    sourceMatchSlots: [toGlobalSlot(side, "semifinals", 1)],
-    targetRound: "final",
-    targetLocalSlot: 1,
-    targetMatchSlot: 1,
-  };
+  return connectors.sort((a, b) => {
+    if (a.side !== b.side) return a.side === "left" ? -1 : 1;
+    if (a.stage !== b.stage) return stageOrder(a.stage) - stageOrder(b.stage);
+    return a.targetLocalSlot - b.targetLocalSlot;
+  });
 }
 
 function getRows(round: SideRound, localSlot: number) {
@@ -247,4 +259,29 @@ function toGlobalSlot(side: BracketSide, round: SideRound, localSlot: number) {
   if (round === "round-of-16") return localSlot + 4;
   if (round === "quarterfinals") return localSlot + 2;
   return 2;
+}
+
+function getConnectorStage(sourceRound: BracketRound, targetRound: BracketRound): BracketConnectorStage | null {
+  if (sourceRound === "round-of-32" && targetRound === "round-of-16") {
+    return "round-of-32-to-round-of-16";
+  }
+  if (sourceRound === "round-of-16" && targetRound === "quarterfinals") {
+    return "round-of-16-to-quarterfinals";
+  }
+  if (sourceRound === "quarterfinals" && targetRound === "semifinals") {
+    return "quarterfinals-to-semifinals";
+  }
+  if (sourceRound === "semifinals" && targetRound === "final") {
+    return "semifinals-to-final";
+  }
+  return null;
+}
+
+function stageOrder(stage: BracketConnectorStage) {
+  return {
+    "round-of-32-to-round-of-16": 0,
+    "round-of-16-to-quarterfinals": 1,
+    "quarterfinals-to-semifinals": 2,
+    "semifinals-to-final": 3,
+  }[stage];
 }

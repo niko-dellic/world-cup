@@ -72,6 +72,29 @@ function getMatchByRoundSlot(matches: Match[], round: BracketRound, slot: number
   return matches.find((match) => match.round === round && match.slot === slot) ?? null;
 }
 
+function getMatchById(matches: Match[], id: string | null | undefined) {
+  if (!id) return null;
+  return matches.find((match) => match.id === id) ?? null;
+}
+
+function getMatchBySource(
+  matches: Match[],
+  match: Match,
+  side: "home" | "away",
+  now: Date,
+  picks: PredictionPicks,
+) {
+  const sourceMatchId = side === "home" ? match.homeSourceMatchId : match.awaySourceMatchId;
+  const sourceMatch = getMatchById(matches, sourceMatchId);
+  if (!sourceMatch) return null;
+
+  const displaySourceMatch = deriveDisplayMatch(sourceMatch, matches, picks, now);
+  const actualWinner = findTeamInMatch(displaySourceMatch, sourceMatch.winnerTeamId);
+  if (actualWinner) return actualWinner;
+
+  return findTeamInMatch(displaySourceMatch, picks[sourceMatch.id]);
+}
+
 function deriveTeamFromPriorSlot(
   matches: Match[],
   picks: PredictionPicks,
@@ -98,8 +121,12 @@ export function deriveDisplayMatch(
   let displayHomeTeam = match.homeTeam;
   let displayAwayTeam = match.awayTeam;
   const priorRound = PRIOR_ROUND[match.round];
+  const hasGraphSources = Boolean(match.homeSourceMatchId || match.awaySourceMatchId);
 
-  if (priorRound && (!displayHomeTeam || !displayAwayTeam)) {
+  displayHomeTeam ??= getMatchBySource(matches, match, "home", now, picks);
+  displayAwayTeam ??= getMatchBySource(matches, match, "away", now, picks);
+
+  if (!hasGraphSources && priorRound && (!displayHomeTeam || !displayAwayTeam)) {
     const firstPriorSlot = (match.slot - 1) * 2 + 1;
     displayHomeTeam ??= deriveTeamFromPriorSlot(matches, picks, priorRound, firstPriorSlot, now);
     displayAwayTeam ??= deriveTeamFromPriorSlot(matches, picks, priorRound, firstPriorSlot + 1, now);

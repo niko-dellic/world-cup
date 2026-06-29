@@ -22,11 +22,11 @@ SUPABASE_SERVICE_ROLE_KEY=
 REFRESH_SECRET=
 ```
 
-Without Supabase env vars the app runs with seeded knockout placeholder data and local browser storage for predictions.
+Without Supabase env vars the app runs from the checked-in 2026 knockout graph and local browser storage for predictions.
 
 ## Database
 
-Apply `supabase/migrations/001_initial.sql` to a Supabase project, then enable anonymous auth in Supabase Auth settings.
+Apply the SQL files in `supabase/migrations/` to a Supabase project in order, then enable anonymous auth in Supabase Auth settings.
 
 ## Refreshing Bracket Data
 

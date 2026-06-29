@@ -1,6 +1,6 @@
 import type { BracketData, BracketRound, Match, MatchStatus, Team } from "@/lib/types";
 import { ROUND_ORDER } from "@/lib/types";
-import { createSeedBracket } from "@/lib/seed-data";
+import { createWorldCup2026Bracket } from "@/lib/seed-data";
 import { makeTeam, slugifyTeamId } from "@/lib/teams";
 
 const FOTMOB_WORLD_CUP_URL = "https://www.fotmob.com/leagues/77/overview/world-cup";
@@ -36,8 +36,10 @@ const ROUND_NAMES: Record<BracketRound, string> = {
 type AnyRecord = Record<string, unknown>;
 
 export async function fetchWorldCupBracket(): Promise<BracketData> {
+  const staticBracket = createWorldCup2026Bracket();
+
   if (process.env.FOOTBALL_DATA_MODE === "seeded") {
-    return createSeedBracket();
+    return staticBracket;
   }
 
   try {
@@ -61,10 +63,10 @@ export async function fetchWorldCupBracket(): Promise<BracketData> {
       throw new Error("No knockout matches found in FotMob payload");
     }
 
-    return normalized;
+    return overlayBracketData(staticBracket, normalized, "fotmob");
   } catch (error) {
-    console.warn("[football-provider] Falling back to seeded data", error);
-    return createSeedBracket();
+    console.warn("[football-provider] Falling back to static World Cup graph", error);
+    return staticBracket;
   }
 }
 
@@ -107,6 +109,7 @@ export function normalizeFotMobBracket(payload: unknown): BracketData {
 function normalizeMatchup(value: unknown, round: BracketRound, slot: number): Match | null {
   if (!isRecord(value)) return null;
 
+  const matchNumber = firstNumber(value, ["matchNumber", "matchNo", "fifaMatchNumber"]);
   const providerId = firstString(value, ["id", "matchId", "eventId"]) ?? `${round}-${slot}`;
   const homeTeam = normalizeTeam(value, "home");
   const awayTeam = normalizeTeam(value, "away");
@@ -116,11 +119,13 @@ function normalizeMatchup(value: unknown, round: BracketRound, slot: number): Ma
   const winnerTeamId = normalizeWinnerId(value, homeTeam, awayTeam, homeScore, awayScore, status);
 
   return {
-    id: `${round}-${slot}`,
+    id: matchNumber ? `m${matchNumber}` : `${round}-${slot}`,
     providerId,
+    matchNumber: matchNumber ?? undefined,
     round,
     roundName: ROUND_NAMES[round],
     slot,
+    visualSlot: slot,
     kickoffTime:
       firstString(value, ["startTime", "kickoffTime", "utcTime", "matchTimeUTC", "time"]) ?? null,
     status,
@@ -131,6 +136,58 @@ function normalizeMatchup(value: unknown, round: BracketRound, slot: number): Ma
     winnerTeamId,
     providerData: value,
   };
+}
+
+export function overlayBracketData(
+  staticBracket: BracketData,
+  providerBracket: BracketData,
+  source: BracketData["source"] = providerBracket.source,
+): BracketData {
+  const providerById = new Map(providerBracket.matches.map((match) => [match.id, match]));
+  const providerByMatchNumber = new Map(
+    providerBracket.matches
+      .filter((match) => typeof match.matchNumber === "number")
+      .map((match) => [match.matchNumber, match]),
+  );
+
+  return {
+    source,
+    refreshedAt: providerBracket.refreshedAt,
+    matches: staticBracket.matches.map((staticMatch) => {
+      const providerMatch =
+        providerById.get(staticMatch.id) ??
+        (staticMatch.matchNumber ? providerByMatchNumber.get(staticMatch.matchNumber) : undefined);
+
+      if (!providerMatch) return staticMatch;
+
+      return {
+        ...staticMatch,
+        providerId: providerMatch.providerId ?? staticMatch.providerId,
+        kickoffTime: providerMatch.kickoffTime ?? staticMatch.kickoffTime,
+        status: providerMatch.status === "unknown" ? staticMatch.status : providerMatch.status,
+        homeTeam: staticMatch.homeTeam ?? providerMatch.homeTeam,
+        awayTeam: staticMatch.awayTeam ?? providerMatch.awayTeam,
+        homeScore: providerMatch.homeScore ?? staticMatch.homeScore,
+        awayScore: providerMatch.awayScore ?? staticMatch.awayScore,
+        winnerTeamId: mapProviderWinnerToStaticTeam(staticMatch, providerMatch),
+        providerData: {
+          ...staticMatch.providerData,
+          providerOverlay: providerMatch.providerData ?? providerMatch,
+        },
+      };
+    }),
+  };
+}
+
+function mapProviderWinnerToStaticTeam(staticMatch: Match, providerMatch: Match) {
+  if (!providerMatch.winnerTeamId) return staticMatch.winnerTeamId;
+  if (providerMatch.winnerTeamId === providerMatch.homeTeam?.id) {
+    return staticMatch.homeTeam?.id ?? providerMatch.winnerTeamId;
+  }
+  if (providerMatch.winnerTeamId === providerMatch.awayTeam?.id) {
+    return staticMatch.awayTeam?.id ?? providerMatch.winnerTeamId;
+  }
+  return providerMatch.winnerTeamId;
 }
 
 function normalizeTeam(value: AnyRecord, side: "home" | "away"): Team | null {

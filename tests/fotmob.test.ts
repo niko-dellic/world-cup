@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { extractNextData, normalizeFotMobBracket } from "@/lib/providers/fotmob";
+import { createSeedBracket } from "@/lib/seed-data";
+import { extractNextData, normalizeFotMobBracket, overlayBracketData } from "@/lib/providers/fotmob";
 
 describe("FotMob provider normalization", () => {
   it("extracts Next.js page data", () => {
@@ -16,9 +17,9 @@ describe("FotMob provider normalization", () => {
         pageProps: {
           dehydratedState: {
             queries: [
-              {
-                state: {
-                  data: {
+      {
+        state: {
+          data: {
                     overview: {
                       playoff: {
                         rounds: [
@@ -27,6 +28,7 @@ describe("FotMob provider normalization", () => {
                             matchups: [
                               {
                                 id: 101,
+                                matchNumber: 73,
                                 homeTeamName: "Spain",
                                 awayTeamName: "Japan",
                                 homeTeamId: 1,
@@ -54,7 +56,8 @@ describe("FotMob provider normalization", () => {
     expect(bracket.source).toBe("fotmob");
     expect(bracket.matches).toHaveLength(1);
     expect(bracket.matches[0]).toMatchObject({
-      id: "round-of-32-1",
+      id: "m73",
+      matchNumber: 73,
       round: "round-of-32",
       status: "completed",
       homeScore: 2,
@@ -83,5 +86,40 @@ describe("FotMob provider normalization", () => {
       "semifinals",
       "final",
     ]);
+  });
+
+  it("overlays provider facts without changing static graph topology", () => {
+    const staticBracket = createSeedBracket("2026-06-29T00:00:00.000Z");
+    const providerBracket = normalizeFotMobBracket({
+      rounds: [
+        {
+          round: "1/16",
+          matchups: [
+            {
+              id: 500,
+              matchNumber: 74,
+              homeTeamName: "Germany",
+              awayTeamName: "Paraguay",
+              homeScore: 2,
+              awayScore: 0,
+              winnerTeamId: "germany",
+              status: "Finished",
+            },
+          ],
+        },
+      ],
+    });
+
+    const overlaid = overlayBracketData(staticBracket, providerBracket);
+    const updated = overlaid.matches.find((match) => match.id === "m74")!;
+    const target = overlaid.matches.find((match) => match.id === "m89")!;
+
+    expect(overlaid.matches).toHaveLength(31);
+    expect(updated.status).toBe("completed");
+    expect(updated.homeScore).toBe(2);
+    expect(updated.homeTeam?.id).toBe("germany");
+    expect(updated.winnerTeamId).toBe("germany");
+    expect(target.homeSourceMatchId).toBe("m74");
+    expect(target.awaySourceMatchId).toBe("m77");
   });
 });

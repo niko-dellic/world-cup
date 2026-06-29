@@ -16,7 +16,7 @@ const WorldCupScene = dynamic(
   { ssr: false },
 );
 
-const LOCAL_STORAGE_KEY = "world-cup-bracket-prediction";
+const LOCAL_STORAGE_KEY = "world-cup-bracket-prediction-v2";
 const SEEDED_DEMO_NOW = new Date("2026-06-27T12:00:00.000Z");
 
 type LocalPrediction = {

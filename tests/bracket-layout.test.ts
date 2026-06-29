@@ -29,20 +29,21 @@ describe("bracket grid layout", () => {
     ).toHaveLength(4);
   });
 
-  it("maps Brazil vs Senegal to the second left opening connector group", () => {
-    const brazilVsSenegal = layout.nodes.find(
-      (node) => node.round === "round-of-32" && node.slot === 3,
+  it("maps Canada vs South Africa to the second left opening connector group", () => {
+    const canadaVsSouthAfrica = layout.nodes.find(
+      (node) => node.matchId === "m73",
     );
     const connector = layout.connectors.find(
       (candidate) =>
         candidate.stage === "round-of-32-to-round-of-16" &&
         candidate.side === "left" &&
-        candidate.sourceLocalSlots.includes(brazilVsSenegal!.localSlot),
+        candidate.sourceMatchIds.includes("m73"),
     );
 
-    expect(brazilVsSenegal?.localSlot).toBe(3);
+    expect(canadaVsSouthAfrica?.localSlot).toBe(3);
     expect(connector?.targetLocalSlot).toBe(2);
-    expect(connector?.sourceMatchSlots).toEqual([3, 4]);
+    expect(connector?.targetMatchId).toBe("m90");
+    expect(connector?.sourceMatchIds).toEqual(["m73", "m75"]);
   });
 
   it("assigns every round-of-32 node to exactly one opening connector group", () => {
@@ -51,10 +52,10 @@ describe("bracket grid layout", () => {
         (connector) =>
           connector.stage === "round-of-32-to-round-of-16" && connector.side === side,
       );
-      const localSlots = openingConnectors.flatMap((connector) => connector.sourceLocalSlots);
+      const sourceIds = openingConnectors.flatMap((connector) => connector.sourceMatchIds);
 
-      expect(localSlots.sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
-      expect(new Set(localSlots)).toHaveProperty("size", 8);
+      expect(sourceIds).toHaveLength(8);
+      expect(new Set(sourceIds)).toHaveProperty("size", 8);
     }
   });
 });
