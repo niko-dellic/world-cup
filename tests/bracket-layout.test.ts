@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildBracketCircularLayout,
   buildBracketGridLayout,
+  buildBracketTeamCircularLayout,
 } from "@/lib/bracket-layout";
 import { createSeedBracket } from "@/lib/seed-data";
 
@@ -187,5 +188,67 @@ describe("bracket circular layout", () => {
           connector.targetPoint.y >= 0,
       ),
     ).toBe(true);
+  });
+});
+
+describe("bracket team circular layout", () => {
+  const layout = buildBracketTeamCircularLayout(createSeedBracket().matches);
+
+  it("places thirty-two opening participant nodes on the outer ring", () => {
+    const openingParticipants = layout.nodes.filter(
+      (node) => node.kind === "participant" && node.round === "round-of-32",
+    );
+
+    expect(openingParticipants).toHaveLength(32);
+    expect(openingParticipants.every((node) => node.radius === 46)).toBe(true);
+  });
+
+  it("splits an opening match into individual home and away team nodes", () => {
+    const germany = layout.nodes.find((node) => node.key === "team-circular-m74-home");
+    const paraguay = layout.nodes.find((node) => node.key === "team-circular-m74-away");
+    const connector = layout.connectors.find(
+      (candidate) => candidate.targetMatchId === "m74",
+    );
+
+    expect(germany).toMatchObject({
+      matchId: "m74",
+      teamSide: "home",
+      angle: -90,
+      radius: 46,
+    });
+    expect(paraguay).toMatchObject({
+      matchId: "m74",
+      teamSide: "away",
+      angle: -78.75,
+      radius: 46,
+    });
+    expect(connector).toMatchObject({
+      stage: "teams-to-round-of-32",
+      kind: "merge",
+      sourceMatchIds: [],
+      targetMatchId: "m74",
+    });
+    expect(connector?.path).toContain("M 50 4");
+  });
+
+  it("centers the team circular final and orders finalists by source geometry", () => {
+    const final = layout.nodes.find((node) => node.kind === "final");
+    const finalConnector = layout.connectors.find(
+      (connector) => connector.stage === "semifinals-to-final",
+    );
+
+    expect(final).toMatchObject({
+      matchId: "m104",
+      x: 50,
+      y: 50,
+      finalTeamSides: ["away", "home"],
+    });
+    expect(finalConnector).toMatchObject({
+      kind: "single",
+      targetMatchId: "m104",
+      sourceMatchIds: ["m101", "m102"],
+    });
+    expect(finalConnector?.path).toContain("L 55.25 50");
+    expect(finalConnector?.path).toContain("L 44.75 50");
   });
 });

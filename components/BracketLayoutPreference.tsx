@@ -10,6 +10,8 @@ import {
 } from "react";
 import {
   DEFAULT_BRACKET_LAYOUT_MODE,
+  getNextBracketLayoutMode,
+  isBracketLayoutMode,
   type BracketLayoutMode,
 } from "@/lib/bracket-layout-mode";
 
@@ -51,7 +53,7 @@ export function BracketLayoutPreferenceProvider({
       layoutMode,
       setLayoutMode,
       toggleLayoutMode: () => {
-        setLayoutMode(layoutMode === "symmetric" ? "circular" : "symmetric");
+        setLayoutMode(getNextBracketLayoutMode(layoutMode));
       },
     }),
     [layoutMode],
@@ -78,9 +80,7 @@ export function useBracketLayoutPreference() {
 function readStoredLayoutMode(): BracketLayoutMode {
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY);
-    return stored === "circular" || stored === "symmetric"
-      ? stored
-      : DEFAULT_BRACKET_LAYOUT_MODE;
+    return isBracketLayoutMode(stored) ? stored : DEFAULT_BRACKET_LAYOUT_MODE;
   } catch {
     return DEFAULT_BRACKET_LAYOUT_MODE;
   }

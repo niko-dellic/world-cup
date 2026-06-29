@@ -6,21 +6,24 @@ import {
   Maximize2,
   Minimize2,
   Trophy,
+  Waypoints,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useBracketLayoutPreference } from "@/components/BracketLayoutPreference";
+import {
+  getNextBracketLayoutMode,
+  type BracketLayoutMode,
+} from "@/lib/bracket-layout-mode";
 
 export function SiteNav() {
   const pathname = usePathname();
   const isLeaderboard = pathname === "/leaderboard";
   const { layoutMode, toggleLayoutMode } = useBracketLayoutPreference();
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const nextLayoutLabel =
-    layoutMode === "symmetric"
-      ? "Switch to circular bracket layout"
-      : "Switch to symmetric bracket layout";
+  const nextLayoutMode = getNextBracketLayoutMode(layoutMode);
+  const nextLayoutLabel = `Switch to ${getLayoutModeLabel(nextLayoutMode)} bracket layout`;
 
   useEffect(() => {
     function handleFullscreenChange() {
@@ -63,15 +66,11 @@ export function SiteNav() {
           type="button"
           className="bracket-layout-toggle"
           aria-label={nextLayoutLabel}
-          aria-pressed={layoutMode === "circular"}
+          aria-pressed={layoutMode !== "symmetric"}
           title={nextLayoutLabel}
           onClick={toggleLayoutMode}
         >
-          {layoutMode === "symmetric" ? (
-            <CircleDotDashed aria-hidden="true" />
-          ) : (
-            <LayoutGrid aria-hidden="true" />
-          )}
+          <BracketLayoutIcon layoutMode={nextLayoutMode} />
         </button>
       ) : null}
       <button
@@ -85,4 +84,19 @@ export function SiteNav() {
       </button>
     </nav>
   );
+}
+
+function BracketLayoutIcon({ layoutMode }: { layoutMode: BracketLayoutMode }) {
+  if (layoutMode === "symmetric") {
+    return <LayoutGrid aria-hidden="true" />;
+  }
+  if (layoutMode === "team-circular") {
+    return <Waypoints aria-hidden="true" />;
+  }
+  return <CircleDotDashed aria-hidden="true" />;
+}
+
+function getLayoutModeLabel(layoutMode: BracketLayoutMode) {
+  if (layoutMode === "team-circular") return "team circular";
+  return layoutMode;
 }

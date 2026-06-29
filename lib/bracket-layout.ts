@@ -89,6 +89,52 @@ export type BracketCircularLayout = {
   connectors: BracketCircularConnectorLayout[];
 };
 
+export type BracketTeamCircularConnectorStage =
+  | "teams-to-round-of-32"
+  | BracketConnectorStage;
+
+export type BracketTeamCircularParticipantNodeLayout = {
+  key: string;
+  matchId: string;
+  round: BracketRound;
+  slot: number;
+  visualSlot: number;
+  localSlot: number;
+  side: BracketNodeSide;
+  kind: "participant";
+  teamSide: BracketMatchSide;
+} & BracketCircularPoint;
+
+export type BracketTeamCircularFinalNodeLayout = {
+  key: string;
+  matchId: string;
+  round: "final";
+  slot: number;
+  visualSlot: number;
+  localSlot: number;
+  side: "center";
+  kind: "final";
+  finalTeamSides?: [BracketMatchSide, BracketMatchSide];
+} & BracketCircularPoint;
+
+export type BracketTeamCircularNodeLayout =
+  | BracketTeamCircularParticipantNodeLayout
+  | BracketTeamCircularFinalNodeLayout;
+
+export type BracketTeamCircularConnectorLayout = {
+  key: string;
+  kind: BracketConnectorKind;
+  stage: BracketTeamCircularConnectorStage;
+  path: string;
+  sourceMatchIds: string[];
+  targetMatchId: string;
+};
+
+export type BracketTeamCircularLayout = {
+  nodes: BracketTeamCircularNodeLayout[];
+  connectors: BracketTeamCircularConnectorLayout[];
+};
+
 type MatchLike = {
   id: string;
   matchNumber?: number;
@@ -99,12 +145,21 @@ type MatchLike = {
   awaySourceMatchId?: string | null;
 };
 
+type TeamCircularMatchState = {
+  match: MatchLike;
+  jointPoint: BracketCircularPoint;
+  participantPoints: [BracketCircularPoint, BracketCircularPoint];
+  finalTeamSides?: [BracketMatchSide, BracketMatchSide];
+};
+
 type SideRound = Exclude<BracketRound, "final">;
 
 const ROW_COUNT = 16;
 const CIRCULAR_CENTER = 50;
 const CIRCULAR_OUTER_MATCH_COUNT = 16;
 const CIRCULAR_FINALIST_OFFSET = 5.25;
+const TEAM_CIRCULAR_OUTER_TEAM_COUNT = 32;
+const TEAM_CIRCULAR_OUTER_RADIUS = 46;
 
 const LOCAL_SLOT_COUNT: Record<SideRound, number> = {
   "round-of-32": 8,
@@ -158,6 +213,16 @@ const CIRCULAR_FALLBACK_SLOT_COUNT: Record<BracketRound, number> = {
   semifinals: 2,
   final: 1,
 };
+
+const TEAM_CIRCULAR_JOINT_RADIUS: Record<BracketRound, number> = {
+  "round-of-32": 38.5,
+  "round-of-16": 29.5,
+  quarterfinals: 20.5,
+  semifinals: 12,
+  final: 0,
+};
+
+const TEAM_CIRCULAR_PARTICIPANT_T = 0.44;
 
 export function buildBracketGridLayout(matches: MatchLike[]): BracketGridLayout {
   return {
@@ -256,6 +321,78 @@ export function buildBracketCircularLayout(matches: MatchLike[]): BracketCircula
   return { nodes, connectors };
 }
 
+export function buildBracketTeamCircularLayout(
+  matches: MatchLike[],
+): BracketTeamCircularLayout {
+  const sortedMatches = [...matches].sort((a, b) => {
+    const roundDiff = ROUND_ORDER.indexOf(a.round) - ROUND_ORDER.indexOf(b.round);
+    return roundDiff === 0
+      ? (a.visualSlot ?? a.slot) - (b.visualSlot ?? b.slot)
+      : roundDiff;
+  });
+  const statesById = new Map<string, TeamCircularMatchState>();
+  const nodes: BracketTeamCircularNodeLayout[] = [];
+  const connectors: BracketTeamCircularConnectorLayout[] = [];
+
+  sortedMatches.forEach((match) => {
+    const sourceIds = [match.homeSourceMatchId, match.awaySourceMatchId].filter(
+      (sourceId): sourceId is string => Boolean(sourceId),
+    );
+    const sourceStates = sourceIds
+      .map((sourceId) => statesById.get(sourceId))
+      .filter((state): state is TeamCircularMatchState => Boolean(state));
+    const state = getTeamCircularMatchState(match, sourceStates);
+    statesById.set(match.id, state);
+
+    if (match.round === "final") {
+      nodes.push({
+        key: `team-circular-final-${match.id}`,
+        matchId: match.id,
+        round: match.round,
+        slot: match.slot,
+        visualSlot: match.visualSlot ?? match.slot,
+        localSlot: 1,
+        side: "center",
+        kind: "final",
+        ...(state.finalTeamSides ? { finalTeamSides: state.finalTeamSides } : {}),
+        ...state.jointPoint,
+      });
+    } else {
+      state.participantPoints.forEach((point, index) => {
+        const teamSide = index === 0 ? "home" : "away";
+        nodes.push({
+          key: `team-circular-${match.id}-${teamSide}`,
+          matchId: match.id,
+          round: match.round,
+          slot: match.slot,
+          visualSlot: match.visualSlot ?? match.slot,
+          localSlot: match.visualSlot ?? match.slot,
+          side: getCircularNodeSide(point.x, point.radius),
+          kind: "participant",
+          teamSide,
+          ...point,
+        });
+      });
+    }
+
+    connectors.push(getTeamCircularConnectorLayout(match, state, sourceStates));
+  });
+
+  return {
+    nodes: nodes.sort((a, b) => {
+      const roundDiff = ROUND_ORDER.indexOf(a.round) - ROUND_ORDER.indexOf(b.round);
+      if (roundDiff !== 0) return roundDiff;
+      if (a.localSlot !== b.localSlot) return a.localSlot - b.localSlot;
+      if (a.kind !== b.kind) return a.kind === "participant" ? -1 : 1;
+      if (a.kind === "participant" && b.kind === "participant") {
+        return a.teamSide === "home" ? -1 : 1;
+      }
+      return 0;
+    }),
+    connectors,
+  };
+}
+
 export function getNodeLayout(match: MatchLike): BracketNodeLayout | null {
   if (match.round === "final") {
     return {
@@ -326,6 +463,122 @@ function getCircularNodeLayout(
           : "winner",
     ...(finalTeamSides ? { finalTeamSides } : {}),
     ...point,
+  };
+}
+
+function getTeamCircularMatchState(
+  match: MatchLike,
+  sourceStates: TeamCircularMatchState[],
+): TeamCircularMatchState {
+  if (match.round === "round-of-32") {
+    const visualSlot = normalizeOuterSlot(match.visualSlot ?? match.slot);
+    const homePoint = pointOnCircle(
+      slotToAngle((visualSlot - 1) * 2 + 1, TEAM_CIRCULAR_OUTER_TEAM_COUNT),
+      TEAM_CIRCULAR_OUTER_RADIUS,
+    );
+    const awayPoint = pointOnCircle(
+      slotToAngle((visualSlot - 1) * 2 + 2, TEAM_CIRCULAR_OUTER_TEAM_COUNT),
+      TEAM_CIRCULAR_OUTER_RADIUS,
+    );
+    const jointPoint = pointOnCircle(
+      circularMean([homePoint.angle, awayPoint.angle]),
+      TEAM_CIRCULAR_JOINT_RADIUS[match.round],
+    );
+
+    return {
+      match,
+      jointPoint,
+      participantPoints: [homePoint, awayPoint],
+    };
+  }
+
+  if (match.round === "final") {
+    const sourceTuple = toSourceStateTuple(sourceStates);
+
+    return {
+      match,
+      jointPoint: pointOnCircle(0, 0),
+      participantPoints: sourceTuple
+        ? getTeamCircularFinalistPoints(sourceTuple)
+        : [getCircularFinalistPoint("left"), getCircularFinalistPoint("right")],
+      ...(sourceTuple
+        ? { finalTeamSides: getTeamCircularFinalTeamSides(sourceTuple) }
+        : {}),
+    };
+  }
+
+  const sourceTuple = toSourceStateTuple(sourceStates);
+  const fallbackAngle = slotToAngle(
+    match.visualSlot ?? match.slot,
+    CIRCULAR_FALLBACK_SLOT_COUNT[match.round],
+  );
+  const jointPoint = pointOnCircle(
+    sourceTuple
+      ? circularMean(sourceTuple.map((sourceState) => sourceState.jointPoint.angle))
+      : fallbackAngle,
+    TEAM_CIRCULAR_JOINT_RADIUS[match.round],
+  );
+
+  return {
+    match,
+    jointPoint,
+    participantPoints: sourceTuple
+      ? sourceTuple.map((sourceState) =>
+          pointBetween(
+            sourceState.jointPoint,
+            jointPoint,
+            TEAM_CIRCULAR_PARTICIPANT_T,
+          ),
+        ) as [BracketCircularPoint, BracketCircularPoint]
+      : getFallbackTeamCircularParticipantPoints(jointPoint),
+  };
+}
+
+function getTeamCircularConnectorLayout(
+  match: MatchLike,
+  state: TeamCircularMatchState,
+  sourceStates: TeamCircularMatchState[],
+): BracketTeamCircularConnectorLayout {
+  const sourceTuple = toSourceStateTuple(sourceStates);
+  const stage =
+    match.round === "round-of-32"
+      ? "teams-to-round-of-32"
+      : sourceTuple
+        ? getConnectorStage(sourceTuple[0].match.round, match.round)
+        : null;
+
+  if (match.round === "final" && sourceTuple) {
+    return {
+      key: `team-circular-final-${match.id}`,
+      kind: "single",
+      stage: "semifinals-to-final",
+      path: [
+        pathSegment(sourceTuple[0].jointPoint, state.participantPoints[0]),
+        pathSegment(sourceTuple[1].jointPoint, state.participantPoints[1]),
+      ].join(" "),
+      sourceMatchIds: sourceTuple.map((sourceState) => sourceState.match.id),
+      targetMatchId: match.id,
+    };
+  }
+
+  const pathParts = [
+    ...(sourceTuple
+      ? [
+          pathSegment(sourceTuple[0].jointPoint, state.participantPoints[0]),
+          pathSegment(sourceTuple[1].jointPoint, state.participantPoints[1]),
+        ]
+      : []),
+    pathSegment(state.participantPoints[0], state.jointPoint),
+    pathSegment(state.participantPoints[1], state.jointPoint),
+  ];
+
+  return {
+    key: `team-circular-${match.round}-${match.id}`,
+    kind: "merge",
+    stage: stage ?? "teams-to-round-of-32",
+    path: pathParts.join(" "),
+    sourceMatchIds: sourceStates.map((sourceState) => sourceState.match.id),
+    targetMatchId: match.id,
   };
 }
 
@@ -435,6 +688,38 @@ function pointOnCircle(angle: number, radius: number): BracketCircularPoint {
   };
 }
 
+function pointBetween(
+  sourcePoint: BracketCircularPoint,
+  targetPoint: BracketCircularPoint,
+  t: number,
+): BracketCircularPoint {
+  return pointFromCoordinates(
+    sourcePoint.x + (targetPoint.x - sourcePoint.x) * t,
+    sourcePoint.y + (targetPoint.y - sourcePoint.y) * t,
+  );
+}
+
+function pointFromCoordinates(x: number, y: number): BracketCircularPoint {
+  const roundedX = roundCoordinate(x);
+  const roundedY = roundCoordinate(y);
+  const xOffset = roundedX - CIRCULAR_CENTER;
+  const yOffset = roundedY - CIRCULAR_CENTER;
+
+  return {
+    x: roundedX,
+    y: roundedY,
+    angle: roundCoordinate((Math.atan2(yOffset, xOffset) * 180) / Math.PI),
+    radius: roundCoordinate(Math.hypot(xOffset, yOffset)),
+  };
+}
+
+function pathSegment(
+  sourcePoint: BracketCircularPoint,
+  targetPoint: BracketCircularPoint,
+) {
+  return `M ${sourcePoint.x} ${sourcePoint.y} L ${targetPoint.x} ${targetPoint.y}`;
+}
+
 function circularMean(angles: number[]) {
   const radians = angles.map((angle) => (angle * Math.PI) / 180);
   const sin = radians.reduce((total, angle) => total + Math.sin(angle), 0);
@@ -465,6 +750,17 @@ function getCircularFinalistPoints(
   ) as [BracketCircularPoint, BracketCircularPoint];
 }
 
+function getTeamCircularFinalistPoints(
+  sourceStates: [TeamCircularMatchState, TeamCircularMatchState],
+): [BracketCircularPoint, BracketCircularPoint] {
+  const leftPoint = getCircularFinalistPoint("left");
+  const rightPoint = getCircularFinalistPoint("right");
+
+  return sourceStates.map((sourceState) =>
+    sourceState.jointPoint.x < CIRCULAR_CENTER ? leftPoint : rightPoint,
+  ) as [BracketCircularPoint, BracketCircularPoint];
+}
+
 function getCircularFinalistPoint(side: BracketSide): BracketCircularPoint {
   const isLeft = side === "left";
 
@@ -491,6 +787,44 @@ function getCircularFinalTeamSides(
     });
 
   return [leftSource.side, rightSource.side] as [BracketMatchSide, BracketMatchSide];
+}
+
+function getTeamCircularFinalTeamSides(
+  sourceStates: [TeamCircularMatchState, TeamCircularMatchState],
+): [BracketMatchSide, BracketMatchSide] {
+  const [leftSource, rightSource] = sourceStates
+    .map((sourceState, index) => ({
+      side: (index === 0 ? "home" : "away") as BracketMatchSide,
+      x: sourceState.jointPoint.x,
+      y: sourceState.jointPoint.y,
+    }))
+    .sort((a, b) => {
+      const xDifference = a.x - b.x;
+      return xDifference === 0 ? a.y - b.y : xDifference;
+    });
+
+  return [leftSource.side, rightSource.side] as [
+    BracketMatchSide,
+    BracketMatchSide,
+  ];
+}
+
+function getFallbackTeamCircularParticipantPoints(
+  jointPoint: BracketCircularPoint,
+): [BracketCircularPoint, BracketCircularPoint] {
+  const radius = Math.min(TEAM_CIRCULAR_OUTER_RADIUS, jointPoint.radius + 5);
+  return [
+    pointOnCircle(jointPoint.angle - 2.4, radius),
+    pointOnCircle(jointPoint.angle + 2.4, radius),
+  ];
+}
+
+function toSourceStateTuple(
+  sourceStates: TeamCircularMatchState[],
+): [TeamCircularMatchState, TeamCircularMatchState] | null {
+  return sourceStates.length === 2
+    ? [sourceStates[0], sourceStates[1]]
+    : null;
 }
 
 function toCircularPoint(layout: BracketCircularNodeLayout): BracketCircularPoint {

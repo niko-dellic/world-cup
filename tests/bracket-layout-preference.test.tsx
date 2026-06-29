@@ -16,7 +16,7 @@ describe("bracket layout preference", () => {
     window.localStorage.clear();
   });
 
-  it("toggles and stores the selected layout mode", () => {
+  it("cycles through and stores the selected layout mode", () => {
     render(
       createElement(
         BracketLayoutPreferenceProvider,
@@ -29,10 +29,20 @@ describe("bracket layout preference", () => {
 
     expect(screen.getByRole("button", { name: "circular" })).toBeInTheDocument();
     expect(window.localStorage.getItem(STORAGE_KEY)).toBe("circular");
+
+    fireEvent.click(screen.getByRole("button", { name: "circular" }));
+
+    expect(screen.getByRole("button", { name: "team-circular" })).toBeInTheDocument();
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe("team-circular");
+
+    fireEvent.click(screen.getByRole("button", { name: "team-circular" }));
+
+    expect(screen.getByRole("button", { name: "symmetric" })).toBeInTheDocument();
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe("symmetric");
   });
 
   it("reads the stored layout mode", async () => {
-    window.localStorage.setItem(STORAGE_KEY, "circular");
+    window.localStorage.setItem(STORAGE_KEY, "team-circular");
 
     render(
       createElement(
@@ -43,7 +53,7 @@ describe("bracket layout preference", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "circular" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "team-circular" })).toBeInTheDocument();
     });
   });
 });
@@ -68,6 +78,27 @@ describe("BracketBoard layout modes", () => {
 
     expect(board).toHaveAttribute("data-layout-mode", "circular");
     expect(board.querySelector(".circular-bracket-connectors")).toBeInTheDocument();
+  });
+
+  it("renders team circular mode when requested", () => {
+    const matches = deriveDisplayMatches(createSeedBracket().matches, {});
+
+    render(
+      createElement(BracketBoard, {
+        matches,
+        picks: {},
+        layoutMode: "team-circular",
+        activeMatchId: null,
+        onActivateMatch: vi.fn(),
+        onClearActiveMatch: vi.fn(),
+        onPick: vi.fn(),
+      }),
+    );
+
+    const board = screen.getByLabelText("World Cup knockout bracket");
+
+    expect(board).toHaveAttribute("data-layout-mode", "team-circular");
+    expect(board.querySelector(".team-circular-bracket-connector-path")).toBeInTheDocument();
   });
 });
 
