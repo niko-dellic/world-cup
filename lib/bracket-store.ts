@@ -145,7 +145,7 @@ export async function persistBracketData(bracket: BracketData) {
 }
 
 export async function getPredictionRows(): Promise<PredictionBracket[]> {
-  const supabase = createSupabaseReadClient();
+  const supabase = createSupabaseAdminClient() ?? createSupabaseReadClient();
   if (!supabase) return [];
 
   const { data, error } = await supabase

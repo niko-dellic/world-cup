@@ -30,6 +30,7 @@ type WorldCupSceneProps = {
 
 const FLAG_BACKDROP_Z = -1.65;
 const EXIT_ANIMATION_MS = 3000;
+const EFFECT_FADE_SECONDS = 0.5;
 
 export function WorldCupScene({ activeMatch }: WorldCupSceneProps) {
   const [renderMatch, setRenderMatch] = useState<DisplayMatch | null>(activeMatch);
@@ -80,7 +81,7 @@ export function WorldCupScene({ activeMatch }: WorldCupSceneProps) {
 
 function EnergyField({ intensity }: { intensity: number }) {
   const materialRef = useRef<ShaderMaterial>(null);
-  const intensityRef = useRef(intensity);
+  const transitionRef = useRef(createEffectTransition(intensity));
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },
@@ -90,12 +91,10 @@ function EnergyField({ intensity }: { intensity: number }) {
   );
 
   useFrame(({ clock }, delta) => {
-    const blend = intensity > 0 ? 1 - Math.pow(0.0008, delta) : 1 - Math.pow(0.22, delta);
-    intensityRef.current += (intensity - intensityRef.current) * blend;
-    const easedIntensity = easeSmooth(clamp(intensityRef.current, 0, 1));
+    const fieldIntensity = updateEffectTransition(transitionRef.current, intensity, delta);
 
     uniforms.uTime.value = clock.elapsedTime;
-    uniforms.uIntensity.value = easedIntensity;
+    uniforms.uIntensity.value = fieldIntensity;
   });
 
   return (
@@ -199,7 +198,7 @@ function MassiveFlagPanel({ team, side, active }: { team: Team; side: "left" | "
 
 function SeamLightning({ active }: { active: boolean }) {
   const viewport = useThree((state) => state.viewport);
-  const intensityRef = useRef(active ? 1 : 0.62);
+  const intensityRef = useRef(createEffectTransition(active ? 1 : 0));
   const lastFrameRef = useRef(-1);
   const lightning = useMemo(() => createLightningObjects(), []);
 
@@ -211,8 +210,7 @@ function SeamLightning({ active }: { active: boolean }) {
     const time = clock.elapsedTime;
     const motion = getLightningMotion(time);
     const targetIntensity = active ? 1 : 0;
-    const blend = active ? 1 - Math.pow(0.0008, delta) : 1 - Math.pow(0.18, delta);
-    intensityRef.current += (targetIntensity - intensityRef.current) * blend;
+    const intensity = updateEffectTransition(intensityRef.current, targetIntensity, delta);
 
     lightning.group.rotation.z = -0.2 + motion.shear * 0.16 + Math.sin(time * 3.7) * 0.018;
     lightning.group.position.x = motion.shear * 0.2;
@@ -220,19 +218,19 @@ function SeamLightning({ active }: { active: boolean }) {
 
     updateLightningRibbonMaterial(
       lightning.coreMaterial,
-      (0.78 + motion.flash * 0.26) * intensityRef.current,
+      (0.78 + motion.flash * 0.26) * intensity,
       time,
       motion.flash,
     );
     updateLightningRibbonMaterial(
       lightning.glowMaterial,
-      (0.3 + motion.flash * 0.2) * intensityRef.current,
+      (0.3 + motion.flash * 0.2) * intensity,
       time,
       motion.flash,
     );
     updateLightningRibbonMaterial(
       lightning.outerGlowMaterial,
-      (0.18 + motion.flash * 0.14) * intensityRef.current,
+      (0.18 + motion.flash * 0.14) * intensity,
       time,
       motion.flash,
     );
@@ -248,7 +246,7 @@ function SeamLightning({ active }: { active: boolean }) {
       lightning.branches.forEach((branch, index) => {
         const branchPoints = frameData.branches[index] ?? null;
         branch.line.visible = Boolean(branchPoints);
-        branch.material.opacity = (branchPoints ? branchPoints.opacity : 0) * intensityRef.current;
+        branch.material.opacity = (branchPoints ? branchPoints.opacity : 0) * intensity;
         if (branchPoints) {
           replaceLineGeometry(branch.line, branchPoints.points);
         }
@@ -269,7 +267,7 @@ function ElectricArcs({
   active: boolean;
 }) {
   const groupRef = useRef<Group>(null);
-  const intensityRef = useRef(active ? 1 : 0);
+  const intensityRef = useRef(createEffectTransition(active ? 1 : 0));
   const lines = useMemo(() => createArcLines(11, leftTeam, rightTeam), [leftTeam, rightTeam]);
 
   useEffect(() => {
@@ -288,9 +286,7 @@ function ElectricArcs({
   useFrame(({ clock }, delta) => {
     if (!groupRef.current) return;
     const targetIntensity = active ? 1 : 0;
-    const blend = active ? 1 - Math.pow(0.0008, delta) : 1 - Math.pow(0.2, delta);
-    intensityRef.current += (targetIntensity - intensityRef.current) * blend;
-    const intensity = easeSmooth(clamp(intensityRef.current, 0, 1));
+    const intensity = updateEffectTransition(intensityRef.current, targetIntensity, delta);
 
     groupRef.current.rotation.z = -0.34 + Math.sin(clock.elapsedTime * 1.8) * 0.04;
     lines.forEach((line, index) => {
@@ -459,6 +455,35 @@ function applyCoverCrop(texture: Texture, planeAspect: number) {
 
 function easeSmooth(value: number) {
   return value * value * (3 - 2 * value);
+}
+
+type EffectTransition = {
+  elapsed: number;
+  start: number;
+  target: number;
+  value: number;
+};
+
+function createEffectTransition(value: number): EffectTransition {
+  return {
+    elapsed: EFFECT_FADE_SECONDS,
+    start: value,
+    target: value,
+    value,
+  };
+}
+
+function updateEffectTransition(transition: EffectTransition, target: number, delta: number) {
+  if (transition.target !== target) {
+    transition.start = transition.value;
+    transition.target = target;
+    transition.elapsed = 0;
+  }
+
+  transition.elapsed = Math.min(EFFECT_FADE_SECONDS, transition.elapsed + delta);
+  const progress = clamp(transition.elapsed / EFFECT_FADE_SECONDS, 0, 1);
+  transition.value = transition.start + (transition.target - transition.start) * easeSmooth(progress);
+  return transition.value;
 }
 
 function getLightningMotion(time: number) {
