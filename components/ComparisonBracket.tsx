@@ -4,6 +4,7 @@ import clsx from "clsx";
 import type { CSSProperties, PointerEvent } from "react";
 import { BracketBoard } from "@/components/BracketBoard";
 import { deriveDisplayMatches } from "@/lib/bracket";
+import type { BracketLayoutMode } from "@/lib/bracket-layout-mode";
 import {
   clampComparisonSplit,
   type ComparisonMode,
@@ -16,6 +17,7 @@ type ComparisonBracketProps = {
   sourceA: PredictionSource;
   sourceB: PredictionSource;
   mode: ComparisonMode;
+  layoutMode?: BracketLayoutMode;
   split: number;
   now?: Date;
   activeMatchId: string | null;
@@ -29,6 +31,7 @@ export function ComparisonBracket({
   sourceA,
   sourceB,
   mode,
+  layoutMode = "symmetric",
   split,
   now,
   activeMatchId,
@@ -63,6 +66,7 @@ export function ComparisonBracket({
         <BracketBoard
           className="comparison-visual-board comparison-visual-board-b"
           interactionMode="visual"
+          layoutMode={layoutMode}
           comparison={mode === "overlay" ? { side: "b", otherPicks: sourceA.picks } : undefined}
           matches={displayMatchesB}
           picks={sourceB.picks}
@@ -83,6 +87,7 @@ export function ComparisonBracket({
         <BracketBoard
           className="comparison-visual-board comparison-visual-board-a"
           interactionMode="visual"
+          layoutMode={layoutMode}
           comparison={mode === "overlay" ? { side: "a", otherPicks: sourceB.picks } : undefined}
           matches={displayMatchesA}
           picks={sourceA.picks}
@@ -103,6 +108,7 @@ export function ComparisonBracket({
         <BracketBoard
           className="comparison-hit-board"
           interactionMode="visual"
+          layoutMode={layoutMode}
           matches={displayMatchesA}
           picks={sourceA.picks}
           activeMatchId={activeMatchId}

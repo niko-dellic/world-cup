@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { BracketLayoutPreferenceProvider } from "@/components/BracketLayoutPreference";
 import { SiteNav } from "@/components/SiteNav";
 import "./globals.css";
 
@@ -20,10 +21,12 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en">
       <body>
-        <header className="site-header">
-          <SiteNav />
-        </header>
-        {children}
+        <BracketLayoutPreferenceProvider>
+          <header className="site-header">
+            <SiteNav />
+          </header>
+          {children}
+        </BracketLayoutPreferenceProvider>
       </body>
     </html>
   );

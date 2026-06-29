@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { BracketBoard } from "@/components/BracketBoard";
+import { useBracketLayoutPreference } from "@/components/BracketLayoutPreference";
 import { ComparisonBracket } from "@/components/ComparisonBracket";
 import { LiveFavicon } from "@/components/LiveFavicon";
 import type { BracketData, DisplayMatch, PredictionPicks } from "@/lib/types";
@@ -51,6 +52,7 @@ type PendingPick = {
 type BracketViewMode = "current" | "predictions" | "compare";
 
 export function HomeDashboard({ initialBracket }: { initialBracket: BracketData }) {
+  const { layoutMode } = useBracketLayoutPreference();
   const [picks, setPicks] = useState<PredictionPicks>({});
   const [displayName, setDisplayName] = useState("");
   const [hasStartedPrediction, setHasStartedPrediction] = useState(false);
@@ -460,6 +462,7 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
             sourceA={compareSourceA}
             sourceB={compareSourceB}
             mode={compareMode}
+            layoutMode={layoutMode}
             split={comparisonSplit}
             now={predictionNow}
             activeMatchId={activeMatch?.id ?? null}
@@ -471,6 +474,7 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
           <BracketBoard
             matches={displayMatches}
             picks={selectedSource.picks}
+            layoutMode={layoutMode}
             activeMatchId={activeMatch?.id ?? null}
             onActivateMatch={setActiveMatchId}
             onClearActiveMatch={() => setActiveMatchId(null)}

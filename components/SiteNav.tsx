@@ -1,14 +1,26 @@
 "use client";
 
-import { Maximize2, Minimize2, Trophy } from "lucide-react";
+import {
+  CircleDotDashed,
+  LayoutGrid,
+  Maximize2,
+  Minimize2,
+  Trophy,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useBracketLayoutPreference } from "@/components/BracketLayoutPreference";
 
 export function SiteNav() {
   const pathname = usePathname();
   const isLeaderboard = pathname === "/leaderboard";
+  const { layoutMode, toggleLayoutMode } = useBracketLayoutPreference();
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const nextLayoutLabel =
+    layoutMode === "symmetric"
+      ? "Switch to circular bracket layout"
+      : "Switch to symmetric bracket layout";
 
   useEffect(() => {
     function handleFullscreenChange() {
@@ -46,6 +58,22 @@ export function SiteNav() {
       >
         {isLeaderboard ? "Brackets" : <Trophy className="site-nav-trophy-icon" aria-hidden="true" />}
       </Link>
+      {!isLeaderboard ? (
+        <button
+          type="button"
+          className="bracket-layout-toggle"
+          aria-label={nextLayoutLabel}
+          aria-pressed={layoutMode === "circular"}
+          title={nextLayoutLabel}
+          onClick={toggleLayoutMode}
+        >
+          {layoutMode === "symmetric" ? (
+            <CircleDotDashed aria-hidden="true" />
+          ) : (
+            <LayoutGrid aria-hidden="true" />
+          )}
+        </button>
+      ) : null}
       <button
         type="button"
         className="fullscreen-toggle"

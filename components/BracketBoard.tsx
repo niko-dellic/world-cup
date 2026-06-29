@@ -1,12 +1,18 @@
 "use client";
 
 import clsx from "clsx";
-import type { CSSProperties } from "react";
+import { Trophy } from "lucide-react";
+import type { CSSProperties, ReactNode } from "react";
 import {
+  buildBracketCircularLayout,
   buildBracketGridLayout,
+  type BracketCircularConnectorLayout,
+  type BracketCircularNodeLayout,
   type BracketConnectorLayout,
+  type BracketMatchSide,
   type BracketNodeLayout,
 } from "@/lib/bracket-layout";
+import type { BracketLayoutMode } from "@/lib/bracket-layout-mode";
 import {
   getComparisonClassNames,
   getComparisonPickRole,
@@ -22,6 +28,7 @@ type BracketBoardProps = {
   matches: DisplayMatch[];
   picks: PredictionPicks;
   className?: string;
+  layoutMode?: BracketLayoutMode;
   interactionMode?: BracketInteractionMode;
   comparison?: {
     side: ComparisonSide;
@@ -37,6 +44,7 @@ export function BracketBoard({
   matches,
   picks,
   className,
+  layoutMode = "symmetric",
   interactionMode = "interactive",
   comparison,
   activeMatchId,
@@ -44,12 +52,34 @@ export function BracketBoard({
   onClearActiveMatch,
   onPick,
 }: BracketBoardProps) {
+  if (layoutMode === "circular") {
+    return (
+      <CircularBracketBoard
+        matches={matches}
+        picks={picks}
+        className={className}
+        interactionMode={interactionMode}
+        comparison={comparison}
+        activeMatchId={activeMatchId}
+        onActivateMatch={onActivateMatch}
+        onClearActiveMatch={onClearActiveMatch}
+        onPick={onPick}
+      />
+    );
+  }
+
   const layout = buildBracketGridLayout(matches);
   const matchesById = new Map(matches.map((match) => [match.id, match]));
 
   return (
     <div
-      className={clsx("terminal-bracket", className, interactionMode === "visual" && "terminal-bracket-visual")}
+      className={clsx(
+        "terminal-bracket",
+        "terminal-bracket-symmetric",
+        className,
+        interactionMode === "visual" && "terminal-bracket-visual",
+      )}
+      data-layout-mode="symmetric"
       data-interaction-mode={interactionMode}
       tabIndex={interactionMode === "interactive" ? 0 : -1}
       aria-label="World Cup knockout bracket"
@@ -103,6 +133,91 @@ export function BracketBoard({
   );
 }
 
+function CircularBracketBoard({
+  matches,
+  picks,
+  className,
+  interactionMode,
+  comparison,
+  activeMatchId,
+  onActivateMatch,
+  onClearActiveMatch,
+  onPick,
+}: Omit<BracketBoardProps, "layoutMode"> & {
+  interactionMode: BracketInteractionMode;
+}) {
+  const layout = buildBracketCircularLayout(matches);
+  const matchesById = new Map(matches.map((match) => [match.id, match]));
+
+  return (
+    <div
+      className={clsx(
+        "terminal-bracket",
+        "terminal-bracket-circular",
+        className,
+        interactionMode === "visual" && "terminal-bracket-visual",
+      )}
+      data-layout-mode="circular"
+      data-interaction-mode={interactionMode}
+      tabIndex={interactionMode === "interactive" ? 0 : -1}
+      aria-label="World Cup knockout bracket"
+      onMouseMove={(event) => {
+        if (!(event.target as HTMLElement).closest(".terminal-node")) {
+          onClearActiveMatch();
+        }
+      }}
+      onPointerMove={(event) => {
+        if (!(event.target as HTMLElement).closest(".terminal-node")) {
+          onClearActiveMatch();
+        }
+      }}
+      onClick={(event) => {
+        if (!(event.target as HTMLElement).closest(".terminal-node")) {
+          onClearActiveMatch();
+        }
+      }}
+      onMouseLeave={onClearActiveMatch}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          onClearActiveMatch();
+        }
+      }}
+    >
+      <svg
+        className="circular-bracket-connectors"
+        viewBox="0 0 100 100"
+        preserveAspectRatio="none"
+        aria-hidden="true"
+      >
+        {layout.connectors.map((connector) => (
+          <CircularConnectorPath key={connector.key} connector={connector} />
+        ))}
+      </svg>
+
+      {layout.nodes.map((node) => {
+        const match = matchesById.get(node.matchId);
+        if (!match) return null;
+
+        return (
+          <CircularTerminalNode
+            key={node.key}
+            match={match}
+            layout={node}
+            selectedTeamId={picks[match.id] ?? null}
+            comparisonSide={comparison?.side}
+            comparisonOtherPick={comparison?.otherPicks[match.id] ?? null}
+            interactionMode={interactionMode}
+            isActive={match.id === activeMatchId}
+            onActivate={() => onActivateMatch(match.id)}
+            onDeactivate={onClearActiveMatch}
+            onPick={(teamId) => onPick(match, teamId)}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 function ConnectorCell({ connector }: { connector: BracketConnectorLayout }) {
   return (
     <div
@@ -131,6 +246,42 @@ function ConnectorCell({ connector }: { connector: BracketConnectorLayout }) {
         <span className="connector-segment connector-single-line" />
       )}
     </div>
+  );
+}
+
+function CircularConnectorPath({
+  connector,
+}: {
+  connector: BracketCircularConnectorLayout;
+}) {
+  const [firstSource, secondSource] = connector.sourcePoints;
+  const path =
+    connector.kind === "single" && connector.targetPoints
+      ? [
+          `M ${firstSource.x} ${firstSource.y}`,
+          `L ${connector.targetPoints[0].x} ${connector.targetPoints[0].y}`,
+          `M ${secondSource.x} ${secondSource.y}`,
+          `L ${connector.targetPoints[1].x} ${connector.targetPoints[1].y}`,
+        ].join(" ")
+      : [
+          `M ${firstSource.x} ${firstSource.y}`,
+          `L ${connector.jointPoint.x} ${connector.jointPoint.y}`,
+          `L ${connector.targetPoint.x} ${connector.targetPoint.y}`,
+          `M ${secondSource.x} ${secondSource.y}`,
+          `L ${connector.jointPoint.x} ${connector.jointPoint.y}`,
+        ].join(" ");
+
+  return (
+    <path
+      className="circular-bracket-connector-path"
+      d={path}
+      data-kind={connector.kind}
+      data-stage={connector.stage}
+      data-target-slot={connector.targetMatchSlot}
+      data-source-slots={connector.sourceMatchSlots.join(",")}
+      data-target-match-id={connector.targetMatchId}
+      data-source-match-ids={connector.sourceMatchIds.join(",")}
+    />
   );
 }
 
@@ -195,17 +346,178 @@ function TerminalNode({
       onClick={onActivate}
     >
       {layout.kind === "final" ? (
-        <div className="final-stack">
-          <span className="final-label" aria-hidden="true">
-            Final
-          </span>
-          {matchupNode}
-        </div>
+        <GridFinalMatchup
+          match={match}
+          predictionTeamId={predictionTeamId}
+          selectedTeamId={displayedSelection}
+          comparisonSide={comparisonSide}
+          comparisonOtherPick={comparisonOtherPick}
+          interactionMode={interactionMode}
+          onPick={onPick}
+        />
       ) : (
         matchupNode
       )}
     </div>
   );
+}
+
+function CircularTerminalNode({
+  match,
+  layout,
+  selectedTeamId,
+  comparisonSide,
+  comparisonOtherPick,
+  interactionMode,
+  isActive,
+  onActivate,
+  onDeactivate,
+  onPick,
+}: {
+  match: DisplayMatch;
+  layout: BracketCircularNodeLayout;
+  selectedTeamId: string | null;
+  comparisonSide?: ComparisonSide;
+  comparisonOtherPick?: string | null;
+  interactionMode: BracketInteractionMode;
+  isActive: boolean;
+  onActivate: () => void;
+  onDeactivate: () => void;
+  onPick: (teamId: string) => void;
+}) {
+  const predictionTeamId = selectedTeamId;
+  const displayedSelection = predictionTeamId ?? match.winnerTeamId;
+  const matchupNode = (
+    <MatchupNode
+      match={match}
+      predictionTeamId={predictionTeamId}
+      selectedTeamId={displayedSelection}
+      comparisonSide={comparisonSide}
+      comparisonOtherPick={comparisonOtherPick}
+      interactionMode={interactionMode}
+      onPick={onPick}
+    />
+  );
+
+  return (
+    <div
+      className={clsx(
+        "terminal-node",
+        "terminal-node-circular",
+        `terminal-node-${layout.kind}`,
+        `terminal-node-${layout.side}`,
+        isActive && "terminal-node-active",
+      )}
+      style={circularPlacement(layout)}
+      data-round={layout.round}
+      data-slot={layout.slot}
+      data-local-slot={layout.localSlot}
+      data-match-id={match.id}
+      data-match-number={match.matchNumber}
+      data-angle={layout.angle}
+      data-radius={layout.radius}
+      onMouseEnter={onActivate}
+      onPointerEnter={onActivate}
+      onMouseMove={onActivate}
+      onPointerMove={onActivate}
+      onMouseLeave={onDeactivate}
+      onPointerLeave={onDeactivate}
+      onFocus={onActivate}
+      onClick={onActivate}
+    >
+      {layout.kind === "final" ? (
+        <GridFinalMatchup
+          match={match}
+          predictionTeamId={predictionTeamId}
+          selectedTeamId={displayedSelection}
+          comparisonSide={comparisonSide}
+          comparisonOtherPick={comparisonOtherPick}
+          interactionMode={interactionMode}
+          teamSides={layout.finalTeamSides}
+          onPick={onPick}
+        />
+      ) : (
+        matchupNode
+      )}
+    </div>
+  );
+}
+
+function FinalStack({
+  children,
+  className,
+}: {
+  children?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={clsx("final-stack", className)}>
+      <span className="final-emblem" aria-hidden="true">
+        <Trophy strokeWidth={1.45} />
+      </span>
+      {children}
+    </div>
+  );
+}
+
+function GridFinalMatchup({
+  match,
+  predictionTeamId,
+  selectedTeamId,
+  comparisonSide,
+  comparisonOtherPick,
+  interactionMode,
+  teamSides = ["home", "away"],
+  onPick,
+}: {
+  match: DisplayMatch;
+  predictionTeamId: string | null;
+  selectedTeamId: string | null;
+  comparisonSide?: ComparisonSide;
+  comparisonOtherPick?: string | null;
+  interactionMode: BracketInteractionMode;
+  teamSides?: [BracketMatchSide, BracketMatchSide];
+  onPick: (teamId: string) => void;
+}) {
+  const [leftTeamSide, rightTeamSide] = teamSides;
+
+  return (
+    <div className="grid-final-matchup" aria-label={`${match.roundName} match ${match.slot}`}>
+      <div className="grid-final-team grid-final-team-home">
+        <TeamPickButton
+          match={match}
+          team={getMatchupTeam(match, leftTeamSide)}
+          side={leftTeamSide}
+          predictionTeamId={predictionTeamId}
+          selectedTeamId={selectedTeamId}
+          comparisonSide={comparisonSide}
+          comparisonOtherPick={comparisonOtherPick}
+          interactionMode={interactionMode}
+          locked={match.isLocked}
+          onPick={onPick}
+        />
+      </div>
+      <FinalStack />
+      <div className="grid-final-team grid-final-team-away">
+        <TeamPickButton
+          match={match}
+          team={getMatchupTeam(match, rightTeamSide)}
+          side={rightTeamSide}
+          predictionTeamId={predictionTeamId}
+          selectedTeamId={selectedTeamId}
+          comparisonSide={comparisonSide}
+          comparisonOtherPick={comparisonOtherPick}
+          interactionMode={interactionMode}
+          locked={match.isLocked}
+          onPick={onPick}
+        />
+      </div>
+    </div>
+  );
+}
+
+function getMatchupTeam(match: DisplayMatch, side: BracketMatchSide) {
+  return side === "home" ? match.displayHomeTeam : match.displayAwayTeam;
 }
 
 function MatchupNode({
@@ -302,6 +614,7 @@ function TeamPickButton({
       type="button"
       className={clsx(
         "team-token-button",
+        !team && "team-token-placeholder",
         team?.id === selectedTeamId && "team-token-selected",
         outcome.classNames,
         getComparisonClassNames(comparisonRole),
@@ -315,7 +628,7 @@ function TeamPickButton({
       aria-label={teamLabel}
       title={teamLabel}
     >
-      {team ? <TeamToken team={team} score={score} /> : <span className="unknown-token">?</span>}
+      {team ? <TeamToken team={team} score={score} /> : <span className="unknown-token" aria-hidden="true" />}
     </button>
   );
 }
@@ -336,5 +649,12 @@ function gridPlacement(layout: Pick<BracketNodeLayout | BracketConnectorLayout, 
   return {
     gridColumn: layout.column,
     gridRow: `${layout.rowStart} / span ${layout.rowSpan}`,
+  } satisfies CSSProperties;
+}
+
+function circularPlacement(layout: BracketCircularNodeLayout) {
+  return {
+    left: `${layout.x}%`,
+    top: `${layout.y}%`,
   } satisfies CSSProperties;
 }
