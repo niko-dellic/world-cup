@@ -1,6 +1,6 @@
 # World Cup Bracket Visualizer
 
-A Next.js + TypeScript World Cup knockout bracket with React Three Fiber visuals, Supabase-backed anonymous predictions, and a protected bracket refresh route for Vercel Cron.
+A Next.js + TypeScript World Cup knockout bracket with React Three Fiber visuals, Supabase-backed anonymous predictions, and a protected bracket refresh route.
 
 ## Getting Started
 
@@ -35,7 +35,14 @@ Apply `supabase/migrations/001_initial.sql` to a Supabase project, then enable a
 - `Authorization: Bearer $REFRESH_SECRET`
 - `x-refresh-secret: $REFRESH_SECRET`
 
-Vercel Cron can call the route automatically through `vercel.json`.
+GitHub Actions calls the route every 30 minutes through `.github/workflows/refresh-bracket.yml`.
+
+Configure these repository secrets:
+
+- `APP_URL`: production app URL, without a trailing slash
+- `REFRESH_SECRET`: the same value configured in the deployed app environment
+
+The workflow can also be run manually from the Actions tab.
 
 ## Scripts
 

@@ -13,12 +13,14 @@ import {
   LinearFilter,
   Line as ThreeLine,
   LineBasicMaterial,
+  Mesh,
   Points,
   SRGBColorSpace,
   ShaderMaterial,
   Texture,
   TextureLoader,
   Vector2,
+  Vector3,
 } from "three";
 import type { DisplayMatch, Team } from "@/lib/types";
 
@@ -192,39 +194,64 @@ function MassiveFlagPanel({ team, side, active }: { team: Team; side: "left" | "
 
 function SeamLightning({ active }: { active: boolean }) {
   const viewport = useThree((state) => state.viewport);
-  const materialRef = useRef<ShaderMaterial>(null);
-  const uniforms = useMemo(
-    () => ({
-      uTime: { value: 0 },
-      uIntensity: { value: active ? 1 : 0.62 },
-    }),
-    [],
-  );
+  const intensityRef = useRef(active ? 1 : 0.62);
+  const lastFrameRef = useRef(-1);
+  const lightning = useMemo(() => createLightningObjects(), []);
 
-  useFrame(({ clock }) => {
-    uniforms.uTime.value = clock.elapsedTime;
-    uniforms.uIntensity.value += ((active ? 1 : 0) - uniforms.uIntensity.value) * (active ? 0.08 : 0.04);
+  useEffect(() => {
+    return () => disposeLightningObjects(lightning);
+  }, [lightning]);
+
+  useFrame(({ clock }, delta) => {
+    const time = clock.elapsedTime;
+    const motion = getLightningMotion(time);
+    const targetIntensity = active ? 1 : 0;
+    const blend = active ? 1 - Math.pow(0.0008, delta) : 1 - Math.pow(0.02, delta);
+    intensityRef.current += (targetIntensity - intensityRef.current) * blend;
+
+    lightning.group.rotation.z = -0.2 + motion.shear * 0.16 + Math.sin(time * 3.7) * 0.018;
+    lightning.group.position.x = motion.shear * 0.2;
+    lightning.group.scale.setScalar(1 + motion.flash * 0.025);
+
+    updateLightningRibbonMaterial(
+      lightning.coreMaterial,
+      (0.78 + motion.flash * 0.26) * intensityRef.current,
+      time,
+      motion.flash,
+    );
+    updateLightningRibbonMaterial(
+      lightning.glowMaterial,
+      (0.3 + motion.flash * 0.2) * intensityRef.current,
+      time,
+      motion.flash,
+    );
+    updateLightningRibbonMaterial(
+      lightning.outerGlowMaterial,
+      (0.18 + motion.flash * 0.14) * intensityRef.current,
+      time,
+      motion.flash,
+    );
+
+    const frame = Math.floor(time * 18);
+    if (frame !== lastFrameRef.current) {
+      lastFrameRef.current = frame;
+      const frameData = createLightningFrame(time, viewport.width, viewport.height);
+      replaceRibbonGeometry(lightning.outerGlowMesh, frameData.points, 0.66 + motion.flash * 0.22);
+      replaceRibbonGeometry(lightning.glowMesh, frameData.points, 0.36 + motion.flash * 0.16);
+      replaceRibbonGeometry(lightning.coreMesh, frameData.points, 0.12 + motion.flash * 0.045);
+
+      lightning.branches.forEach((branch, index) => {
+        const branchPoints = frameData.branches[index] ?? null;
+        branch.line.visible = Boolean(branchPoints) && intensityRef.current > 0.04;
+        branch.material.opacity = (branchPoints ? branchPoints.opacity : 0) * intensityRef.current;
+        if (branchPoints) {
+          replaceLineGeometry(branch.line, branchPoints.points);
+        }
+      });
+    }
   });
 
-  return (
-    <mesh
-      position={[0, 0, 0.25]}
-      rotation={[0, 0, -0.26]}
-      scale={[viewport.width * 0.32, viewport.height * 1.38, 1]}
-    >
-      <planeGeometry args={[1, 1, 64, 128]} />
-      <shaderMaterial
-        ref={materialRef}
-        uniforms={uniforms}
-        vertexShader={energyVertexShader}
-        fragmentShader={seamFragmentShader}
-        transparent
-        depthWrite={false}
-        blending={AdditiveBlending}
-        side={DoubleSide}
-      />
-    </mesh>
-  );
+  return <primitive object={lightning.group} />;
 }
 
 function ElectricArcs({
@@ -421,6 +448,298 @@ function easeSmooth(value: number) {
   return value * value * (3 - 2 * value);
 }
 
+function getLightningMotion(time: number) {
+  const lowShear = Math.sin(time * 1.22) * 0.55 + Math.sin(time * 2.45 + 1.7) * 0.2;
+  const snap = Math.max(0, Math.sin(time * 6.8 + Math.sin(time * 1.9) * 2.8));
+  const strike = Math.floor(time * 14 + Math.sin(time * 2.1) * 2.2);
+  const flashA = Math.pow(Math.max(0, Math.sin(time * 12.9 + Math.sin(time * 2.3) * 3.4)), 9);
+  const flashB = Math.pow(Math.max(0, Math.sin(time * 21.5 + 1.3)), 16);
+  const flash = Math.min(1, flashA * 0.72 + flashB * 0.45 + snap * snap * 0.2);
+
+  return {
+    shear: Math.max(-1, Math.min(1, lowShear + (snap - 0.5) * 0.18)),
+    strike,
+    flash,
+  };
+}
+
+type LightningBranchFrame = {
+  points: Vector3[];
+  opacity: number;
+};
+
+type LightningObjects = {
+  group: Group;
+  coreMesh: Mesh;
+  glowMesh: Mesh;
+  outerGlowMesh: Mesh;
+  coreMaterial: ShaderMaterial;
+  glowMaterial: ShaderMaterial;
+  outerGlowMaterial: ShaderMaterial;
+  branches: Array<{
+    line: ThreeLine;
+    material: LineBasicMaterial;
+  }>;
+};
+
+function createLightningObjects(): LightningObjects {
+  const group = new Group();
+  group.position.z = 0.45;
+
+  const initialPoints = [new Vector3(0, -4, 0), new Vector3(0, 4, 0)];
+  const outerGlowMaterial = createLightningRibbonMaterial("#0891b2", 0.18, 0.62);
+  const glowMaterial = createLightningRibbonMaterial("#22d3ee", 0.42, 0.9);
+  const coreMaterial = createLightningRibbonMaterial("#f8feff", 0.95, 1.8);
+
+  const outerGlowMesh = new Mesh(createRibbonGeometry(initialPoints, 0.66), outerGlowMaterial);
+  const glowMesh = new Mesh(createRibbonGeometry(initialPoints, 0.36), glowMaterial);
+  const coreMesh = new Mesh(createRibbonGeometry(initialPoints, 0.12), coreMaterial);
+  outerGlowMesh.position.z = -0.03;
+  glowMesh.position.z = 0.01;
+  coreMesh.position.z = 0.05;
+
+  group.add(outerGlowMesh, glowMesh, coreMesh);
+
+  const branches = Array.from({ length: 14 }, (_, index) => {
+    const material = new LineBasicMaterial({
+      color: index % 3 === 0 ? "#f8feff" : index % 3 === 1 ? "#67e8f9" : "#38bdf8",
+      transparent: true,
+      opacity: 0,
+      blending: AdditiveBlending,
+      depthWrite: false,
+    });
+    const line = new ThreeLine(createLineGeometry(initialPoints), material);
+    line.visible = false;
+    group.add(line);
+    return { line, material };
+  });
+
+  return {
+    group,
+    coreMesh,
+    glowMesh,
+    outerGlowMesh,
+    coreMaterial,
+    glowMaterial,
+    outerGlowMaterial,
+    branches,
+  };
+}
+
+function createLightningFrame(time: number, viewportWidth: number, viewportHeight: number) {
+  const motion = getLightningMotion(time);
+  const top = viewportHeight * 0.82;
+  const bottom = -top;
+  const pointCount = 26;
+  const maxSwing = Math.max(0.55, viewportWidth * 0.085);
+  const points = Array.from({ length: pointCount }, (_, index) => {
+    const t = index / (pointCount - 1);
+    const y = bottom + (top - bottom) * t;
+    const cell = Math.floor(t * 18);
+    const strikeJitter = (hashNumber(cell * 9.17 + motion.strike * 1.91) - 0.5) * (0.42 + motion.flash * 0.28);
+    const wave =
+      Math.sin(t * Math.PI * 6.6 + time * 5.2) * 0.18 +
+      Math.sin(t * Math.PI * 13.0 - time * 7.4) * 0.08;
+    const shear = (t - 0.5) * motion.shear * viewportHeight * 0.085;
+    const x = clamp(shear + strikeJitter + wave, -maxSwing, maxSwing);
+    const z = Math.sin(t * Math.PI * 2 + time * 2.2) * 0.045;
+    return new Vector3(x, y, z);
+  });
+
+  const branches = Array.from({ length: 14 }, (_, index): LightningBranchFrame | null => {
+    const seed = index * 27.13 + motion.strike * 1.7;
+    const branchGate = hashNumber(seed);
+    if (branchGate < 0.26 - motion.flash * 0.16) return null;
+
+    const startIndex = 3 + Math.floor(hashNumber(seed + 9.4) * (pointCount - 7));
+    const start = points[startIndex];
+    const direction = hashNumber(seed + 2.2) > 0.5 ? 1 : -1;
+    const length = 0.28 + hashNumber(seed + 4.6) * (0.62 + motion.flash * 0.25);
+    const lift = (hashNumber(seed + 7.2) - 0.5) * 0.95;
+    const branchPoints = Array.from({ length: 5 }, (_, branchIndex) => {
+      const t = branchIndex / 4;
+      const wobble = (hashNumber(seed + branchIndex * 5.1) - 0.5) * 0.16;
+      return new Vector3(
+        start.x + direction * length * t + wobble,
+        start.y + lift * t + Math.sin(t * Math.PI + time * 8.0 + seed) * 0.08,
+        0.08 + t * 0.05,
+      );
+    });
+
+    return {
+      points: branchPoints,
+      opacity: (0.2 + motion.flash * 0.58) * (0.6 + branchGate * 0.5),
+    };
+  });
+
+  return { points, branches };
+}
+
+function createLightningRibbonMaterial(color: string, opacity: number, edgePower: number) {
+  return new ShaderMaterial({
+    uniforms: {
+      uColor: { value: new Color(color) },
+      uOpacity: { value: opacity },
+      uTime: { value: 0 },
+      uEdgePower: { value: edgePower },
+      uFlicker: { value: 0 },
+    },
+    vertexShader: lightningRibbonVertexShader,
+    fragmentShader: lightningRibbonFragmentShader,
+    transparent: true,
+    depthWrite: false,
+    blending: AdditiveBlending,
+    side: DoubleSide,
+  });
+}
+
+function updateLightningRibbonMaterial(
+  material: ShaderMaterial,
+  opacity: number,
+  time: number,
+  flicker: number,
+) {
+  material.uniforms.uOpacity.value = opacity;
+  material.uniforms.uTime.value = time;
+  material.uniforms.uFlicker.value = flicker;
+}
+
+function replaceRibbonGeometry(mesh: Mesh, points: Vector3[], width: number) {
+  const previousGeometry = mesh.geometry;
+  mesh.geometry = createRibbonGeometry(points, width);
+  previousGeometry.dispose();
+}
+
+function replaceLineGeometry(line: ThreeLine, points: Vector3[]) {
+  const previousGeometry = line.geometry;
+  line.geometry = createLineGeometry(points);
+  previousGeometry.dispose();
+}
+
+function createLineGeometry(points: Vector3[]) {
+  const geometry = new BufferGeometry();
+  geometry.setFromPoints(points);
+  return geometry;
+}
+
+function createRibbonGeometry(points: Vector3[], width: number) {
+  const smoothedPoints = smoothLightningPoints(points);
+  const positions: number[] = [];
+  const sideValues: number[] = [];
+  const progressValues: number[] = [];
+  const indices: number[] = [];
+  const halfWidth = width * 0.5;
+
+  smoothedPoints.forEach((point, index) => {
+    const previous = smoothedPoints[Math.max(0, index - 1)];
+    const next = smoothedPoints[Math.min(smoothedPoints.length - 1, index + 1)];
+    const tangentX = next.x - previous.x;
+    const tangentY = next.y - previous.y;
+    const tangentLength = Math.hypot(tangentX, tangentY) || 1;
+    const normalX = -tangentY / tangentLength;
+    const normalY = tangentX / tangentLength;
+    const progress = smoothedPoints.length === 1 ? 0 : index / (smoothedPoints.length - 1);
+
+    [-1, -0.42, -0.12, 0.12, 0.42, 1].forEach((sideValue) => {
+      positions.push(
+        point.x + normalX * halfWidth * sideValue,
+        point.y + normalY * halfWidth * sideValue,
+        point.z,
+      );
+      sideValues.push(sideValue);
+      progressValues.push(progress);
+    });
+
+    if (index < smoothedPoints.length - 1) {
+      const base = index * 6;
+      const nextBase = base + 6;
+      for (let sideIndex = 0; sideIndex < 5; sideIndex += 1) {
+        indices.push(
+          base + sideIndex,
+          base + sideIndex + 1,
+          nextBase + sideIndex,
+          base + sideIndex + 1,
+          nextBase + sideIndex + 1,
+          nextBase + sideIndex,
+        );
+      }
+    }
+  });
+
+  const geometry = new BufferGeometry();
+  geometry.setAttribute("position", new Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("aSide", new Float32BufferAttribute(sideValues, 1));
+  geometry.setAttribute("aProgress", new Float32BufferAttribute(progressValues, 1));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function smoothLightningPoints(points: Vector3[]) {
+  if (points.length < 3) return points;
+
+  const result: Vector3[] = [];
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const previous = points[Math.max(0, index - 1)];
+    const current = points[index];
+    const next = points[index + 1];
+    const afterNext = points[Math.min(points.length - 1, index + 2)];
+    const steps = 3;
+
+    for (let step = 0; step < steps; step += 1) {
+      const t = step / steps;
+      result.push(catmullRomPoint(previous, current, next, afterNext, t));
+    }
+  }
+
+  result.push(points[points.length - 1].clone());
+  return result;
+}
+
+function catmullRomPoint(p0: Vector3, p1: Vector3, p2: Vector3, p3: Vector3, t: number) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return new Vector3(
+    0.5 *
+      (2 * p1.x +
+        (-p0.x + p2.x) * t +
+        (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
+        (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+    0.5 *
+      (2 * p1.y +
+        (-p0.y + p2.y) * t +
+        (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
+        (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3),
+    0.5 *
+      (2 * p1.z +
+        (-p0.z + p2.z) * t +
+        (2 * p0.z - 5 * p1.z + 4 * p2.z - p3.z) * t2 +
+        (-p0.z + 3 * p1.z - 3 * p2.z + p3.z) * t3),
+  );
+}
+
+function disposeLightningObjects(lightning: LightningObjects) {
+  lightning.coreMesh.geometry.dispose();
+  lightning.glowMesh.geometry.dispose();
+  lightning.outerGlowMesh.geometry.dispose();
+  lightning.coreMaterial.dispose();
+  lightning.glowMaterial.dispose();
+  lightning.outerGlowMaterial.dispose();
+  lightning.branches.forEach((branch) => {
+    branch.line.geometry.dispose();
+    branch.material.dispose();
+  });
+}
+
+function hashNumber(value: number) {
+  const hashed = Math.sin(value * 12.9898) * 43758.5453123;
+  return hashed - Math.floor(hashed);
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function createArcLines(count: number, leftTeam: Team, rightTeam: Team, active: boolean) {
   return Array.from({ length: count }, (_, index) => {
     const points: number[] = [];
@@ -540,6 +859,47 @@ const energyFragmentShader = `
   }
 `;
 
+const lightningRibbonVertexShader = `
+  attribute float aSide;
+  attribute float aProgress;
+  varying float vSide;
+  varying float vProgress;
+
+  void main() {
+    vSide = aSide;
+    vProgress = aProgress;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const lightningRibbonFragmentShader = `
+  uniform vec3 uColor;
+  uniform float uOpacity;
+  uniform float uTime;
+  uniform float uEdgePower;
+  uniform float uFlicker;
+  varying float vSide;
+  varying float vProgress;
+
+  float boltHash(float value) {
+    return fract(sin(value * 41.183) * 43758.5453123);
+  }
+
+  void main() {
+    float edgeDistance = 1.0 - abs(vSide);
+    float feather = smoothstep(0.0, 0.82, edgeDistance);
+    float softAura = pow(max(feather, 0.0), uEdgePower);
+    float hotCenter = pow(smoothstep(0.18, 1.0, edgeDistance), 3.2);
+    float travelingPulse = 0.78 + 0.22 * sin(uTime * 20.0 - vProgress * 36.0);
+    float brokenCharge = 0.82 + 0.18 * sin(uTime * 47.0 + vProgress * 117.0 + boltHash(vProgress) * 6.28);
+    float flash = 1.0 + uFlicker * (0.75 + hotCenter * 1.45);
+    float alpha = uOpacity * softAura * travelingPulse * brokenCharge;
+    vec3 whiteHeat = vec3(0.82, 0.98, 1.0) * hotCenter * flash;
+    vec3 color = uColor * (0.7 + softAura * 0.95) + whiteHeat;
+    gl_FragColor = vec4(color, clamp(alpha, 0.0, 1.0));
+  }
+`;
+
 const seamShapeGlsl = `
   float seamHash(vec2 p) {
     return fract(sin(dot(p, vec2(269.5, 183.3))) * 43758.5453123);
@@ -606,39 +966,17 @@ const flagFragmentShader = `
     vec4 flag = texture2D(uMap, coverUv);
     float seamDistance = uSide < 0.0 ? 1.0 - vUv.x : vUv.x;
     float sharedOffset = seamOffset(vUv.y, uTime);
-    float cutWidth = clamp(0.075 + uSide * sharedOffset, 0.018, 0.24);
-    float lightningMask = smoothstep(cutWidth, cutWidth + 0.035, seamDistance);
-    float edgeGlow = 1.0 - smoothstep(0.0, 0.13, abs(seamDistance - cutWidth));
+    float edgeNoise = seamNoise(vec2(vUv.y * 34.0, uTime * 3.0));
+    float edgeSpark = sin(vUv.y * 88.0 + uTime * 18.0 + edgeNoise * 4.0) * 0.012;
+    float cutWidth = clamp(0.075 + uSide * sharedOffset + edgeSpark, 0.018, 0.24);
+    float featherWidth = 0.105 + edgeNoise * 0.055;
+    float lightningMask = smoothstep(cutWidth, cutWidth + featherWidth, seamDistance);
+    float edgeGlow = 1.0 - smoothstep(0.0, featherWidth * 1.65, abs(seamDistance - cutWidth));
+    float smokeFade = 0.78 + edgeNoise * 0.22;
     float gustShade = 1.0 + vWave * 2.2;
     flag.rgb *= gustShade;
     flag.rgb += vec3(0.08, 0.92, 1.0) * edgeGlow * 0.42 * uProgress;
-    flag.a *= lightningMask * uProgress;
+    flag.a *= mix(lightningMask, lightningMask * smokeFade, edgeGlow * 0.42) * uProgress;
     gl_FragColor = flag;
-  }
-`;
-
-const seamFragmentShader = `
-  uniform float uTime;
-  uniform float uIntensity;
-  varying vec2 vUv;
-  ${seamShapeGlsl}
-
-  void main() {
-    vec2 uv = vUv;
-    float boltPath = 0.5 + seamOffset(uv.y, uTime);
-    float dist = abs(uv.x - boltPath);
-    float core = smoothstep(0.055, 0.0, dist);
-    float glow = smoothstep(0.42, 0.0, dist);
-    float branches = smoothstep(
-      0.78,
-      1.0,
-      sin((uv.x + uv.y) * 46.0 + seamNoise(uv * 18.0) * 8.0 + uTime * 11.0)
-    );
-    branches *= smoothstep(0.48, 0.0, abs(uv.x - boltPath));
-    vec3 color = vec3(0.72, 0.96, 1.0) * core * 1.25;
-    color += vec3(0.08, 0.72, 1.0) * glow * 0.98;
-    color += vec3(0.05, 0.22, 1.0) * branches * 0.64;
-    float alpha = clamp((core * 0.92 + glow * 0.58 + branches * 0.26) * uIntensity, 0.0, 1.0);
-    gl_FragColor = vec4(color, alpha);
   }
 `;

@@ -2,7 +2,6 @@
 
 import clsx from "clsx";
 import type { CSSProperties } from "react";
-import { getSelectableTeams } from "@/lib/bracket";
 import {
   buildBracketGridLayout,
   type BracketConnectorLayout,
@@ -128,31 +127,9 @@ function TerminalNode({
   onDeactivate: () => void;
   onPick: (teamId: string) => void;
 }) {
-  const selectableTeams = getSelectableTeams(match);
-  const winner =
-    selectableTeams.find((team) => team.id === selectedTeamId) ??
-    selectableTeams.find((team) => team.id === match.winnerTeamId) ??
-    null;
-  const canPick = !match.isLocked && selectableTeams.length > 0;
-
-  function cyclePick() {
-    onActivate();
-    if (!canPick) return;
-    const currentIndex = selectableTeams.findIndex((team) => team.id === selectedTeamId);
-    const nextTeam = selectableTeams[(currentIndex + 1) % selectableTeams.length];
-    if (nextTeam) onPick(nextTeam.id);
-  }
-
-  const winnerButton = (
-    <button
-      type="button"
-      className={clsx("winner-node", winner && "winner-node-picked")}
-      aria-disabled={!canPick}
-      onClick={cyclePick}
-      aria-label={`${match.roundName} match ${match.slot}`}
-    >
-      {winner ? <TeamToken team={winner} /> : <span className="tbd-token">TBD</span>}
-    </button>
+  const displayedSelection = selectedTeamId ?? match.winnerTeamId;
+  const matchupNode = (
+    <MatchupNode match={match} selectedTeamId={displayedSelection} onPick={onPick} />
   );
 
   return (
@@ -176,23 +153,21 @@ function TerminalNode({
       onFocus={onActivate}
       onClick={onActivate}
     >
-      {layout.kind === "outer" ? (
-        <OuterMatchNode match={match} selectedTeamId={selectedTeamId} onPick={onPick} />
-      ) : layout.kind === "final" ? (
+      {layout.kind === "final" ? (
         <div className="final-stack">
           <span className="final-label" aria-hidden="true">
             Final
           </span>
-          {winnerButton}
+          {matchupNode}
         </div>
       ) : (
-        winnerButton
+        matchupNode
       )}
     </div>
   );
 }
 
-function OuterMatchNode({
+function MatchupNode({
   match,
   selectedTeamId,
   onPick,
