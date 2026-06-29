@@ -144,6 +144,7 @@ export function overlayBracketData(
   providerBracket: BracketData,
   source: BracketData["source"] = providerBracket.source,
 ): BracketData {
+  const staticTeams = collectStaticTeams(staticBracket);
   const providerById = new Map(providerBracket.matches.map((match) => [match.id, match]));
   const providerByMatchNumber = new Map(
     providerBracket.matches
@@ -165,15 +166,17 @@ export function overlayBracketData(
 
       if (!providerMatch) return staticMatch;
 
+      const sideAlignedScores = alignProviderScoresToStaticMatch(staticMatch, providerMatch);
+
       return {
         ...staticMatch,
         providerId: providerMatch.providerId ?? staticMatch.providerId,
         kickoffTime: providerMatch.kickoffTime ?? staticMatch.kickoffTime,
         status: providerMatch.status === "unknown" ? staticMatch.status : providerMatch.status,
-        homeTeam: staticMatch.homeTeam ?? getConcreteProviderTeam(providerMatch, "home"),
-        awayTeam: staticMatch.awayTeam ?? getConcreteProviderTeam(providerMatch, "away"),
-        homeScore: providerMatch.homeScore ?? staticMatch.homeScore,
-        awayScore: providerMatch.awayScore ?? staticMatch.awayScore,
+        homeTeam: staticMatch.homeTeam ?? getConcreteProviderTeam(staticTeams, providerMatch, "home"),
+        awayTeam: staticMatch.awayTeam ?? getConcreteProviderTeam(staticTeams, providerMatch, "away"),
+        homeScore: sideAlignedScores.homeScore ?? staticMatch.homeScore,
+        awayScore: sideAlignedScores.awayScore ?? staticMatch.awayScore,
         winnerTeamId: mapProviderWinnerToStaticTeam(staticMatch, providerMatch),
         providerData: {
           ...staticMatch.providerData,
@@ -346,6 +349,19 @@ function findDirectPenaltyShootoutScore(value: unknown): { homeScore: number; aw
 
 function mapProviderWinnerToStaticTeam(staticMatch: Match, providerMatch: Match) {
   if (!providerMatch.winnerTeamId) return staticMatch.winnerTeamId;
+  if (providerMatch.winnerTeamId === staticMatch.homeTeam?.id) return staticMatch.homeTeam.id;
+  if (providerMatch.winnerTeamId === staticMatch.awayTeam?.id) return staticMatch.awayTeam.id;
+
+  const providerWinnerTeam =
+    providerMatch.winnerTeamId === providerMatch.homeTeam?.id
+      ? providerMatch.homeTeam
+      : providerMatch.winnerTeamId === providerMatch.awayTeam?.id
+        ? providerMatch.awayTeam
+        : null;
+
+  if (teamsReferToSameTeam(staticMatch.homeTeam, providerWinnerTeam)) return staticMatch.homeTeam?.id ?? providerMatch.winnerTeamId;
+  if (teamsReferToSameTeam(staticMatch.awayTeam, providerWinnerTeam)) return staticMatch.awayTeam?.id ?? providerMatch.winnerTeamId;
+
   if (providerMatch.winnerTeamId === providerMatch.homeTeam?.id) {
     return staticMatch.homeTeam?.id ?? providerMatch.winnerTeamId;
   }
@@ -355,7 +371,33 @@ function mapProviderWinnerToStaticTeam(staticMatch: Match, providerMatch: Match)
   return providerMatch.winnerTeamId;
 }
 
-function getConcreteProviderTeam(providerMatch: Match, side: "home" | "away") {
+function alignProviderScoresToStaticMatch(staticMatch: Match, providerMatch: Match) {
+  const providerHomeMatchesStaticHome = teamsReferToSameTeam(staticMatch.homeTeam, providerMatch.homeTeam);
+  const providerAwayMatchesStaticAway = teamsReferToSameTeam(staticMatch.awayTeam, providerMatch.awayTeam);
+  const providerHomeMatchesStaticAway = teamsReferToSameTeam(staticMatch.awayTeam, providerMatch.homeTeam);
+  const providerAwayMatchesStaticHome = teamsReferToSameTeam(staticMatch.homeTeam, providerMatch.awayTeam);
+
+  if (providerHomeMatchesStaticHome || providerAwayMatchesStaticAway) {
+    return {
+      homeScore: providerMatch.homeScore,
+      awayScore: providerMatch.awayScore,
+    };
+  }
+
+  if (providerHomeMatchesStaticAway || providerAwayMatchesStaticHome) {
+    return {
+      homeScore: providerMatch.awayScore,
+      awayScore: providerMatch.homeScore,
+    };
+  }
+
+  return {
+    homeScore: providerMatch.homeScore,
+    awayScore: providerMatch.awayScore,
+  };
+}
+
+function getConcreteProviderTeam(staticTeams: Team[], providerMatch: Match, side: "home" | "away") {
   const team = side === "home" ? providerMatch.homeTeam : providerMatch.awayTeam;
   if (!team) return null;
 
@@ -364,7 +406,35 @@ function getConcreteProviderTeam(providerMatch: Match, side: "home" | "away") {
   if (providerData?.[tbdKey]) return null;
   if (team.shortName === "TBD" || team.name.includes("/")) return null;
 
-  return team;
+  return findStaticTeam(staticTeams, team) ?? team;
+}
+
+function collectStaticTeams(staticBracket: BracketData) {
+  const teams = new Map<string, Team>();
+
+  for (const match of staticBracket.matches) {
+    if (match.homeTeam) teams.set(match.homeTeam.id, match.homeTeam);
+    if (match.awayTeam) teams.set(match.awayTeam.id, match.awayTeam);
+  }
+
+  return [...teams.values()];
+}
+
+function findStaticTeam(staticTeams: Team[], providerTeam: Team | null) {
+  if (!providerTeam) return null;
+  return staticTeams.find((staticTeam) => teamsReferToSameTeam(staticTeam, providerTeam)) ?? null;
+}
+
+function teamsReferToSameTeam(a: Team | null | undefined, b: Team | null | undefined) {
+  if (!a || !b) return false;
+  if (a.id === b.id) return true;
+  if (a.providerId && b.providerId && a.providerId === b.providerId) return true;
+  if (normalizeComparableTeamName(a.name) === normalizeComparableTeamName(b.name)) return true;
+  return a.shortName.toUpperCase() === b.shortName.toUpperCase();
+}
+
+function normalizeComparableTeamName(value: string) {
+  return slugifyTeamId(value);
 }
 
 function normalizeTeam(value: AnyRecord, side: "home" | "away"): Team | null {

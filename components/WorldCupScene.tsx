@@ -34,6 +34,7 @@ const EXIT_ANIMATION_MS = 3000;
 const EFFECT_FADE_SECONDS = 0.5;
 const SPECKLE_COUNT = 620;
 const SPECKLE_LOOP_SECONDS = 240;
+const AMBIENT_BURST_LINE_COUNT = 9;
 
 export function WorldCupScene({ activeMatch }: WorldCupSceneProps) {
   const [renderMatch, setRenderMatch] = useState<DisplayMatch | null>(activeMatch);
@@ -66,6 +67,7 @@ export function WorldCupScene({ activeMatch }: WorldCupSceneProps) {
       >
         <color attach="background" args={["#050507"]} />
         <SpeckleField />
+        <AmbientLightningBursts active={!activeMatch} />
         {hasMatch ? (
           <group key={`${renderMatch!.id}-${leftTeam!.id}-${rightTeam!.id}`}>
             <MassiveFlagBackdrop leftTeam={leftTeam!} rightTeam={rightTeam!} active={isActive} />
@@ -343,6 +345,93 @@ function SpeckleField() {
         blending={AdditiveBlending}
       />
     </points>
+  );
+}
+
+function AmbientLightningBursts({ active }: { active: boolean }) {
+  const viewport = useThree((state) => state.viewport);
+  const groupRef = useRef<Group>(null);
+  const burstRef = useRef({
+    active: false,
+    duration: 0.42,
+    nextAt: 1.6,
+    power: 1,
+    seed: 1,
+    startedAt: 0,
+  });
+  const lines = useMemo(() => createAmbientBurstLines(), []);
+
+  useEffect(() => {
+    return () => {
+      lines.forEach((line) => {
+        line.geometry.dispose();
+        if (Array.isArray(line.material)) {
+          line.material.forEach((material) => material.dispose());
+        } else {
+          line.material.dispose();
+        }
+      });
+    };
+  }, [lines]);
+
+  useFrame(({ clock }) => {
+    const time = clock.elapsedTime;
+    const burst = burstRef.current;
+
+    if (!active) {
+      burst.active = false;
+      burst.nextAt = time + 1.4;
+      if (groupRef.current) groupRef.current.visible = false;
+      lines.forEach((line) => {
+        line.visible = false;
+        if (line.material instanceof LineBasicMaterial) line.material.opacity = 0;
+      });
+      return;
+    }
+
+    if (!burst.active && time >= burst.nextAt) {
+      const power = getAmbientBurstPower(burst.seed);
+      startAmbientBurst(lines, viewport.width, viewport.height, burst.seed, power);
+      burst.active = true;
+      burst.startedAt = time;
+      burst.power = power;
+      burst.duration = 0.22 + power * 0.12 + hashNumber(burst.seed * 5.33) * 0.16;
+      burst.seed += 1;
+      if (groupRef.current) groupRef.current.visible = true;
+    }
+
+    if (!burst.active) return;
+
+    const progress = (time - burst.startedAt) / burst.duration;
+    if (progress >= 1) {
+      burst.active = false;
+      burst.nextAt = time + 2.4 + hashNumber(burst.seed * 7.77) * 4.6;
+      if (groupRef.current) groupRef.current.visible = false;
+      lines.forEach((line) => {
+        line.visible = false;
+        if (line.material instanceof LineBasicMaterial) line.material.opacity = 0;
+      });
+      return;
+    }
+
+    const envelope = Math.sin(progress * Math.PI);
+    lines.forEach((line, index) => {
+      const flicker = 0.72 + hashNumber(burst.seed * 13.9 + index * 3.1 + Math.floor(time * 28)) * 0.34;
+      const weight = typeof line.userData.burstWeight === "number" ? line.userData.burstWeight : 1;
+      line.visible = weight > 0;
+      if (line.material instanceof LineBasicMaterial) {
+        const baseOpacity = index === 0 ? 0.42 + burst.power * 0.22 : 0.18 + burst.power * 0.16;
+        line.material.opacity = clamp(envelope * flicker * baseOpacity * weight, 0, 1);
+      }
+    });
+  });
+
+  return (
+    <group ref={groupRef} position={[0, 0, 0.18]} visible={false}>
+      {lines.map((line, index) => (
+        <primitive key={index} object={line} />
+      ))}
+    </group>
   );
 }
 
@@ -817,6 +906,90 @@ function createArcLines(count: number, leftTeam: Team, rightTeam: Team) {
     });
     return new ThreeLine(geometry, material);
   });
+}
+
+function createAmbientBurstLines() {
+  const initialPoints = [new Vector3(0, 0, 0), new Vector3(0.001, 0.001, 0)];
+  return Array.from({ length: AMBIENT_BURST_LINE_COUNT }, (_, index) => {
+    const material = new LineBasicMaterial({
+      color: index === 0 ? "#f8feff" : index % 2 === 0 ? "#67e8f9" : "#38bdf8",
+      transparent: true,
+      opacity: 0,
+      blending: AdditiveBlending,
+      depthWrite: false,
+    });
+    const line = new ThreeLine(createLineGeometry(initialPoints), material);
+    line.visible = false;
+    line.userData.burstWeight = 0;
+    return line;
+  });
+}
+
+function getAmbientBurstPower(seed: number) {
+  const rarity = hashNumber(seed * 97.31);
+  if (rarity > 0.92) return 2.15 + hashNumber(seed * 101.9) * 0.85;
+  if (rarity > 0.68) return 1.15 + hashNumber(seed * 103.7) * 0.75;
+  return 0.42 + hashNumber(seed * 107.5) * 0.58;
+}
+
+function startAmbientBurst(
+  lines: ThreeLine[],
+  viewportWidth: number,
+  viewportHeight: number,
+  seed: number,
+  power: number,
+) {
+  const center = new Vector3(
+    (hashNumber(seed * 11.7) - 0.5) * viewportWidth * 0.82,
+    (hashNumber(seed * 19.3) - 0.5) * viewportHeight * 0.72,
+    0,
+  );
+  const angle = hashNumber(seed * 23.9) * Math.PI * 2;
+  const length = 0.32 + power * (0.62 + hashNumber(seed * 31.1) * 0.5);
+  const segmentCount = 5 + Math.floor(power * 2.4) + Math.floor(hashNumber(seed * 37.5) * 4);
+  const tangent = new Vector3(Math.cos(angle), Math.sin(angle), 0);
+  const normal = new Vector3(-tangent.y, tangent.x, 0);
+  const start = center.clone().addScaledVector(tangent, -length * 0.5);
+  const mainPoints = Array.from({ length: segmentCount }, (_, index) => {
+    const t = index / (segmentCount - 1);
+    const jitter =
+      (hashNumber(seed * 43.1 + index * 6.7) - 0.5) *
+      (0.12 + power * 0.16) *
+      Math.sin(t * Math.PI);
+    return start
+      .clone()
+      .addScaledVector(tangent, length * t)
+      .addScaledVector(normal, jitter);
+  });
+
+  replaceLineGeometry(lines[0], mainPoints);
+  lines[0].userData.burstWeight = 1;
+
+  for (let index = 1; index < lines.length; index += 1) {
+    const branchSeed = seed * 71.9 + index * 17.3;
+    const branchChance = clamp(0.16 + power * 0.28 - index * 0.025, 0.08, 0.92);
+    const branchWeight =
+      hashNumber(branchSeed + 12.6) <= branchChance
+        ? clamp(0.28 + power * 0.22 + hashNumber(branchSeed + 15.4) * 0.38, 0, 1)
+        : 0;
+    const originIndex = 1 + Math.floor(hashNumber(branchSeed) * (mainPoints.length - 2));
+    const origin = mainPoints[originIndex];
+    const side = hashNumber(branchSeed + 2.1) > 0.5 ? 1 : -1;
+    const branchAngle = angle + side * (0.44 + hashNumber(branchSeed + 4.8) * (0.68 + power * 0.12));
+    const branchLength = branchWeight * (0.12 + power * (0.16 + hashNumber(branchSeed + 8.2) * 0.22));
+    const branchDirection = new Vector3(Math.cos(branchAngle), Math.sin(branchAngle), 0);
+    const branchNormal = new Vector3(-branchDirection.y, branchDirection.x, 0);
+    const branchPoints = Array.from({ length: 4 }, (_, branchIndex) => {
+      const t = branchIndex / 3;
+      const jitter = (hashNumber(branchSeed + branchIndex * 5.4) - 0.5) * (0.05 + power * 0.05);
+      return origin
+        .clone()
+        .addScaledVector(branchDirection, branchLength * t)
+        .addScaledVector(branchNormal, jitter * Math.sin(t * Math.PI));
+    });
+    replaceLineGeometry(lines[index], branchPoints);
+    lines[index].userData.burstWeight = branchWeight;
+  }
 }
 
 function createSpeckleGeometry() {

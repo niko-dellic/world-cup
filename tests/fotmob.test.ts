@@ -163,4 +163,61 @@ describe("FotMob provider normalization", () => {
     expect(target.homeSourceMatchId).toBe("m76");
     expect(displayTarget.displayHomeTeam?.id).toBe("brazil");
   });
+
+  it("aligns provider scores and winners when FotMob reverses team order", () => {
+    const staticBracket = createSeedBracket("2026-06-29T00:00:00.000Z");
+    const providerBracket = normalizeFotMobBracket({
+      rounds: [
+        {
+          round: "1/16",
+          matchups: [
+            { homeTeam: "Germany", awayTeam: "Paraguay" },
+            { homeTeam: "France", awayTeam: "Sweden" },
+            {
+              homeTeamId: 6316,
+              awayTeamId: 5810,
+              homeTeam: "South Africa",
+              awayTeam: "Canada",
+              homeTeamShortName: "RSA",
+              awayTeamShortName: "CAN",
+              homeScore: 0,
+              awayScore: 1,
+              winner: 5810,
+              status: { finished: true },
+            },
+          ],
+        },
+        {
+          round: "1/8",
+          matchups: [
+            { homeTeam: "Germany/Paraguay", awayTeam: "France/Sweden", tbdTeam1: true, tbdTeam2: true },
+            {
+              homeTeamId: 5810,
+              awayTeamId: 2055187,
+              homeTeam: "Canada",
+              awayTeam: "Netherlands/Morocco",
+              homeTeamShortName: "CAN",
+              awayTeamShortName: "TBD",
+              tbdTeam1: false,
+              tbdTeam2: true,
+            },
+          ],
+        },
+      ],
+    });
+
+    const overlaid = overlayBracketData(staticBracket, providerBracket);
+    const display = deriveDisplayMatches(overlaid.matches, {});
+    const updated = overlaid.matches.find((match) => match.id === "m73")!;
+    const roundOf16 = overlaid.matches.find((match) => match.id === "m90")!;
+    const displayRoundOf16 = display.find((match) => match.id === "m90")!;
+
+    expect(updated.homeScore).toBe(1);
+    expect(updated.awayScore).toBe(0);
+    expect(updated.winnerTeamId).toBe("canada");
+    expect(roundOf16.homeTeam?.id).toBe("canada");
+    expect(roundOf16.homeTeam?.flagEmoji).toBe("🇨🇦");
+    expect(displayRoundOf16.displayHomeTeam?.id).toBe("canada");
+    expect(displayRoundOf16.displayHomeTeam?.flagEmoji).toBe("🇨🇦");
+  });
 });
