@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { SiteNav } from "@/components/SiteNav";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -21,9 +21,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en">
       <body>
         <header className="site-header">
-          <nav className="site-nav" aria-label="Primary navigation">
-            <Link href="/leaderboard">Leaderboard</Link>
-          </nav>
+          <SiteNav />
         </header>
         {children}
       </body>
