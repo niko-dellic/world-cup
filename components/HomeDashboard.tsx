@@ -61,8 +61,6 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
       ? null
       : publicPredictions.find((prediction) => prediction.id === selectedPredictionId) ?? null;
   const visiblePicks = isViewingCurrentStandings ? EMPTY_PICKS : selectedPublicPrediction?.picks ?? picks;
-  const isViewingPublicPrediction = Boolean(selectedPublicPrediction);
-  const isReadOnlyView = isViewingCurrentStandings || isViewingPublicPrediction;
 
   const displayMatches = useMemo(
     () => deriveDisplayMatches(initialBracket.matches, visiblePicks, predictionNow),
@@ -200,6 +198,8 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
   }, []);
 
   function handlePick(match: DisplayMatch, teamId: string) {
+    setSelectedPredictionId(OWN_PREDICTION_ID);
+
     if (!hasStartedPrediction || !normalizeDisplayName(displayName)) {
       openNamePrompt({ matchId: match.id, teamId });
       return;
@@ -209,6 +209,7 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
   }
 
   function handleStartPrediction() {
+    setSelectedPredictionId(OWN_PREDICTION_ID);
     openNamePrompt(null);
   }
 
@@ -302,7 +303,6 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
         <BracketBoard
           matches={displayMatches}
           picks={visiblePicks}
-          viewOnly={isReadOnlyView}
           activeMatchId={activeMatch?.id ?? null}
           onActivateMatch={setActiveMatchId}
           onClearActiveMatch={() => setActiveMatchId(null)}
