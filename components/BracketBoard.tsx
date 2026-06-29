@@ -7,12 +7,25 @@ import {
   type BracketConnectorLayout,
   type BracketNodeLayout,
 } from "@/lib/bracket-layout";
+import {
+  getComparisonClassNames,
+  getComparisonPickRole,
+  type ComparisonSide,
+} from "@/lib/comparison";
 import { getTeamPredictionOutcome } from "@/lib/prediction-outcome";
 import type { DisplayMatch, PredictionPicks, Team } from "@/lib/types";
+
+type BracketInteractionMode = "interactive" | "visual";
 
 type BracketBoardProps = {
   matches: DisplayMatch[];
   picks: PredictionPicks;
+  className?: string;
+  interactionMode?: BracketInteractionMode;
+  comparison?: {
+    side: ComparisonSide;
+    otherPicks: PredictionPicks;
+  };
   activeMatchId: string | null;
   onActivateMatch: (matchId: string) => void;
   onClearActiveMatch: () => void;
@@ -22,6 +35,9 @@ type BracketBoardProps = {
 export function BracketBoard({
   matches,
   picks,
+  className,
+  interactionMode = "interactive",
+  comparison,
   activeMatchId,
   onActivateMatch,
   onClearActiveMatch,
@@ -32,8 +48,9 @@ export function BracketBoard({
 
   return (
     <div
-      className="terminal-bracket"
-      tabIndex={0}
+      className={clsx("terminal-bracket", className, interactionMode === "visual" && "terminal-bracket-visual")}
+      data-interaction-mode={interactionMode}
+      tabIndex={interactionMode === "interactive" ? 0 : -1}
       aria-label="World Cup knockout bracket"
       onMouseMove={(event) => {
         if (!(event.target as HTMLElement).closest(".terminal-node")) {
@@ -71,6 +88,9 @@ export function BracketBoard({
             match={match}
             layout={node}
             selectedTeamId={picks[match.id] ?? null}
+            comparisonSide={comparison?.side}
+            comparisonOtherPick={comparison?.otherPicks[match.id] ?? null}
+            interactionMode={interactionMode}
             isActive={match.id === activeMatchId}
             onActivate={() => onActivateMatch(match.id)}
             onDeactivate={onClearActiveMatch}
@@ -117,6 +137,9 @@ function TerminalNode({
   match,
   layout,
   selectedTeamId,
+  comparisonSide,
+  comparisonOtherPick,
+  interactionMode,
   isActive,
   onActivate,
   onDeactivate,
@@ -125,6 +148,9 @@ function TerminalNode({
   match: DisplayMatch;
   layout: BracketNodeLayout;
   selectedTeamId: string | null;
+  comparisonSide?: ComparisonSide;
+  comparisonOtherPick?: string | null;
+  interactionMode: BracketInteractionMode;
   isActive: boolean;
   onActivate: () => void;
   onDeactivate: () => void;
@@ -137,6 +163,9 @@ function TerminalNode({
       match={match}
       predictionTeamId={predictionTeamId}
       selectedTeamId={displayedSelection}
+      comparisonSide={comparisonSide}
+      comparisonOtherPick={comparisonOtherPick}
+      interactionMode={interactionMode}
       onPick={onPick}
     />
   );
@@ -182,11 +211,17 @@ function MatchupNode({
   match,
   predictionTeamId,
   selectedTeamId,
+  comparisonSide,
+  comparisonOtherPick,
+  interactionMode,
   onPick,
 }: {
   match: DisplayMatch;
   predictionTeamId: string | null;
   selectedTeamId: string | null;
+  comparisonSide?: ComparisonSide;
+  comparisonOtherPick?: string | null;
+  interactionMode: BracketInteractionMode;
   onPick: (teamId: string) => void;
 }) {
   return (
@@ -196,6 +231,9 @@ function MatchupNode({
         team={match.displayHomeTeam}
         predictionTeamId={predictionTeamId}
         selectedTeamId={selectedTeamId}
+        comparisonSide={comparisonSide}
+        comparisonOtherPick={comparisonOtherPick}
+        interactionMode={interactionMode}
         locked={match.isLocked}
         onPick={onPick}
       />
@@ -204,6 +242,9 @@ function MatchupNode({
         team={match.displayAwayTeam}
         predictionTeamId={predictionTeamId}
         selectedTeamId={selectedTeamId}
+        comparisonSide={comparisonSide}
+        comparisonOtherPick={comparisonOtherPick}
+        interactionMode={interactionMode}
         locked={match.isLocked}
         onPick={onPick}
       />
@@ -216,6 +257,9 @@ function TeamPickButton({
   team,
   predictionTeamId,
   selectedTeamId,
+  comparisonSide,
+  comparisonOtherPick,
+  interactionMode,
   locked,
   onPick,
 }: {
@@ -223,9 +267,22 @@ function TeamPickButton({
   team: Team | null;
   predictionTeamId: string | null;
   selectedTeamId: string | null;
+  comparisonSide?: ComparisonSide;
+  comparisonOtherPick?: string | null;
+  interactionMode: BracketInteractionMode;
   locked: boolean;
   onPick: (teamId: string) => void;
 }) {
+  const sourceATeamId = comparisonSide === "b" ? comparisonOtherPick : predictionTeamId;
+  const sourceBTeamId = comparisonSide === "a" ? comparisonOtherPick : predictionTeamId;
+  const comparisonRole =
+    team?.id === predictionTeamId
+      ? getComparisonPickRole({
+          teamId: team.id,
+          sourceATeamId,
+          sourceBTeamId,
+        })
+      : "none";
   const outcome = getTeamPredictionOutcome({
     status: match.status,
     teamId: team?.id,
@@ -241,11 +298,13 @@ function TeamPickButton({
         "team-token-button",
         team?.id === selectedTeamId && "team-token-selected",
         outcome.classNames,
+        getComparisonClassNames(comparisonRole),
       )}
       disabled={!team}
-      aria-disabled={!team || locked}
+      aria-disabled={!team || locked || interactionMode === "visual"}
+      tabIndex={interactionMode === "interactive" ? undefined : -1}
       onClick={() => {
-        if (team && !locked) onPick(team.id);
+        if (team && !locked && interactionMode === "interactive") onPick(team.id);
       }}
       aria-label={teamLabel}
       title={teamLabel}

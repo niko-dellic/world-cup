@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { getBracketData, getPredictionRows } from "@/lib/bracket-store";
 import { computeLeaderboard } from "@/lib/bracket";
 
@@ -11,9 +10,6 @@ export default async function LeaderboardPage() {
       <section className="page-shell leaderboard-shell">
         <div className="leaderboard-topline">
           <h1 className="leaderboard-title">Leaderboard</h1>
-          <Link href="/" className="make-picks-button" aria-label="Make picks" title="Make picks">
-            +
-          </Link>
         </div>
 
         {leaderboard.length === 0 ? (

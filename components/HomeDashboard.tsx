@@ -4,9 +4,19 @@ import dynamic from "next/dynamic";
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { BracketBoard } from "@/components/BracketBoard";
+import { ComparisonBracket } from "@/components/ComparisonBracket";
 import { LiveFavicon } from "@/components/LiveFavicon";
 import type { BracketData, DisplayMatch, PredictionPicks } from "@/lib/types";
 import { applyPick, deriveDisplayMatches, sanitizePicks } from "@/lib/bracket";
+import {
+  CURRENT_STANDINGS_SOURCE_ID,
+  OWN_PREDICTION_SOURCE_ID,
+  buildPredictionSources,
+  getDifferentSourceId,
+  resolvePredictionSource,
+  type ComparisonMode,
+  type PredictionSource,
+} from "@/lib/comparison";
 import {
   getBrowserSupabaseClient,
   isSupabaseConfigured,
@@ -19,7 +29,6 @@ const WorldCupScene = dynamic(
 
 const LOCAL_STORAGE_KEY = "world-cup-bracket-prediction-v2";
 const SEEDED_DEMO_NOW = new Date("2026-06-27T12:00:00.000Z");
-const EMPTY_PICKS: PredictionPicks = {};
 
 type LocalPrediction = {
   displayName?: string;
@@ -39,8 +48,7 @@ type PendingPick = {
   teamId: string;
 };
 
-const OWN_PREDICTION_ID = "self";
-const CURRENT_STANDINGS_ID = "current-standings";
+type BracketViewMode = "current" | "predictions" | "compare";
 
 export function HomeDashboard({ initialBracket }: { initialBracket: BracketData }) {
   const [picks, setPicks] = useState<PredictionPicks>({});
@@ -50,24 +58,46 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
   const [nameDraft, setNameDraft] = useState("");
   const [pendingPick, setPendingPick] = useState<PendingPick | null>(null);
   const [publicPredictions, setPublicPredictions] = useState<PublicPrediction[]>([]);
-  const [selectedPredictionId, setSelectedPredictionId] = useState(CURRENT_STANDINGS_ID);
+  const [viewMode, setViewMode] = useState<BracketViewMode>("current");
+  const [selectedPredictionId, setSelectedPredictionId] = useState(CURRENT_STANDINGS_SOURCE_ID);
+  const [compareMode, setCompareMode] = useState<ComparisonMode>("slider");
+  const [compareAId, setCompareAId] = useState(CURRENT_STANDINGS_SOURCE_ID);
+  const [compareBId, setCompareBId] = useState(OWN_PREDICTION_SOURCE_ID);
+  const [comparisonSplit, setComparisonSplit] = useState(50);
   const [predictionLoaded, setPredictionLoaded] = useState(false);
   const [remotePersistenceAvailable, setRemotePersistenceAvailable] = useState(isSupabaseConfigured);
   const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
   const predictionNow = initialBracket.source === "seeded" ? SEEDED_DEMO_NOW : undefined;
-  const isViewingCurrentStandings = selectedPredictionId === CURRENT_STANDINGS_ID;
-  const selectedPublicPrediction =
-    selectedPredictionId === OWN_PREDICTION_ID || isViewingCurrentStandings
-      ? null
-      : publicPredictions.find((prediction) => prediction.id === selectedPredictionId) ?? null;
-  const visiblePicks = isViewingCurrentStandings ? EMPTY_PICKS : selectedPublicPrediction?.picks ?? picks;
+  const predictionSources = useMemo(
+    () => buildPredictionSources({ ownPicks: picks, publicPredictions }),
+    [picks, publicPredictions],
+  );
+  const predictionOnlySources = useMemo(
+    () => predictionSources.filter((source) => source.kind !== "current"),
+    [predictionSources],
+  );
+  const currentStandingsSource = resolvePredictionSource(predictionSources, CURRENT_STANDINGS_SOURCE_ID);
+  const selectedPredictionSource = resolvePredictionSource(predictionOnlySources, selectedPredictionId);
+  const selectedSource = viewMode === "current" ? currentStandingsSource : selectedPredictionSource;
+  const isCompareView = viewMode === "compare";
+  const compareSourceA = resolvePredictionSource(predictionSources, compareAId);
+  const compareSourceB = resolvePredictionSource(
+    predictionSources,
+    compareBId === compareSourceA.id ? getDifferentSourceId(predictionSources, compareSourceA.id) : compareBId,
+  );
+  const scenePicks = isCompareView ? compareSourceA.picks : selectedSource.picks;
 
   const displayMatches = useMemo(
-    () => deriveDisplayMatches(initialBracket.matches, visiblePicks, predictionNow),
-    [initialBracket.matches, visiblePicks, predictionNow],
+    () => deriveDisplayMatches(initialBracket.matches, selectedSource.picks, predictionNow),
+    [initialBracket.matches, selectedSource.picks, predictionNow],
   );
 
-  const activeMatch = displayMatches.find((match) => match.id === activeMatchId) ?? null;
+  const sceneDisplayMatches = useMemo(
+    () => deriveDisplayMatches(initialBracket.matches, scenePicks, predictionNow),
+    [initialBracket.matches, scenePicks, predictionNow],
+  );
+
+  const activeMatch = sceneDisplayMatches.find((match) => match.id === activeMatchId) ?? null;
   const hasLiveMatch = displayMatches.some((match) => match.status === "live");
 
   useEffect(() => {
@@ -197,8 +227,25 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
     };
   }, []);
 
+  useEffect(() => {
+    if (!isNamePromptOpen) return undefined;
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        cancelNamePrompt();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isNamePromptOpen]);
+
   function handlePick(match: DisplayMatch, teamId: string) {
-    setSelectedPredictionId(OWN_PREDICTION_ID);
+    setViewMode("predictions");
+    setSelectedPredictionId(OWN_PREDICTION_SOURCE_ID);
 
     if (!hasStartedPrediction || !normalizeDisplayName(displayName)) {
       openNamePrompt({ matchId: match.id, teamId });
@@ -209,13 +256,14 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
   }
 
   function handleStartPrediction() {
-    setSelectedPredictionId(OWN_PREDICTION_ID);
+    setViewMode("predictions");
+    setSelectedPredictionId(OWN_PREDICTION_SOURCE_ID);
     openNamePrompt(null);
   }
 
   function openNamePrompt(nextPendingPick: PendingPick | null) {
     setPendingPick(nextPendingPick);
-    setSelectedPredictionId(OWN_PREDICTION_ID);
+    setSelectedPredictionId(OWN_PREDICTION_SOURCE_ID);
     setNameDraft(normalizeDisplayName(displayName) ?? "");
     setIsNamePromptOpen(true);
   }
@@ -228,7 +276,7 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
     setDisplayName(nextDisplayName);
     setHasStartedPrediction(true);
     setIsNamePromptOpen(false);
-    setSelectedPredictionId(OWN_PREDICTION_ID);
+    setSelectedPredictionId(OWN_PREDICTION_SOURCE_ID);
 
     if (pendingPick) {
       const { matchId, teamId } = pendingPick;
@@ -242,100 +290,220 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
     setPendingPick(null);
   }
 
+  function changeViewMode(nextMode: BracketViewMode) {
+    if (nextMode === "predictions" && selectedPredictionId === CURRENT_STANDINGS_SOURCE_ID) {
+      setSelectedPredictionId(OWN_PREDICTION_SOURCE_ID);
+    }
+
+    if (nextMode === "compare" && viewMode !== "compare") {
+      const primarySource = viewMode === "current" ? currentStandingsSource : selectedPredictionSource;
+      setCompareAId(primarySource.id);
+      setCompareBId(getDifferentSourceId(predictionSources, primarySource.id));
+      setComparisonSplit(50);
+    }
+
+    setViewMode(nextMode);
+  }
+
+  const predictionNameControl = (
+    <div className="prediction-edit-cluster">
+      {hasStartedPrediction ? (
+        <button
+          type="button"
+          className="prediction-name-row"
+          aria-label="Edit leaderboard name"
+          onClick={() => openNamePrompt(null)}
+        >
+          <span>name</span>
+          <strong>{normalizeDisplayName(displayName) ?? "add name"}</strong>
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="prediction-start-button"
+          aria-label="Start making picks"
+          title="Start making picks"
+          onClick={handleStartPrediction}
+        >
+          +
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <main className="home-page">
       <LiveFavicon active={hasLiveMatch} />
       <WorldCupScene activeMatch={activeMatch} />
       <section className="dashboard-shell">
         <div className="prediction-toolbar">
-          <PredictionViewerCombobox
-            predictions={publicPredictions}
-            selectedId={selectedPredictionId}
-            onSelect={setSelectedPredictionId}
-          />
-          <div className="prediction-edit-cluster">
-            {hasStartedPrediction ? (
-              <label className="prediction-name-row">
-                <span>name</span>
-                <input
-                  type="text"
-                  value={displayName}
-                  maxLength={48}
-                  aria-label="Leaderboard name"
-                  spellCheck={false}
-                  onChange={(event) => setDisplayName(event.target.value)}
+          <div className="prediction-view-mode-control" aria-label="Bracket view">
+            <span>view:</span>
+            <button
+              type="button"
+              className={viewMode === "current" ? "prediction-view-mode-button-active" : undefined}
+              aria-pressed={viewMode === "current"}
+              onClick={() => changeViewMode("current")}
+            >
+              current standings
+            </button>
+            <button
+              type="button"
+              className={viewMode === "predictions" ? "prediction-view-mode-button-active" : undefined}
+              aria-pressed={viewMode === "predictions"}
+              onClick={() => changeViewMode("predictions")}
+            >
+              predictions
+            </button>
+            <button
+              type="button"
+              className={viewMode === "compare" ? "prediction-view-mode-button-active" : undefined}
+              aria-pressed={viewMode === "compare"}
+              onClick={() => changeViewMode("compare")}
+            >
+              compare
+            </button>
+          </div>
+
+          <div className="prediction-toolbar-settings">
+            {viewMode === "predictions" ? (
+              <>
+                <PredictionSourceSelector
+                  label="prediction"
+                  sources={predictionOnlySources}
+                  selectedId={selectedPredictionSource.id}
+                  onSelect={setSelectedPredictionId}
                 />
-              </label>
-            ) : (
-              <button
-                type="button"
-                className="prediction-start-button"
-                aria-label="Start making picks"
-                title="Start making picks"
-                onClick={handleStartPrediction}
-              >
-                +
-              </button>
-            )}
-            {isNamePromptOpen ? (
-              <form className="prediction-name-prompt" onSubmit={submitNamePrompt}>
-                <label>
-                  <span>name</span>
-                  <input
-                    type="text"
-                    value={nameDraft}
-                    maxLength={48}
-                    required
-                    autoFocus
-                    aria-label="Prediction name"
-                    spellCheck={false}
-                    onChange={(event) => setNameDraft(event.target.value)}
-                  />
-                </label>
-                <button type="submit">ok</button>
-                <button type="button" aria-label="Cancel name entry" onClick={cancelNamePrompt}>
-                  x
-                </button>
-              </form>
+                {predictionNameControl}
+              </>
+            ) : null}
+            {viewMode === "compare" ? (
+              <div className="prediction-comparison-controls">
+                <PredictionSourceSelector
+                  label="a"
+                  sources={predictionSources}
+                  selectedId={compareSourceA.id}
+                  onSelect={(sourceId) => {
+                    setCompareAId(sourceId);
+                    if (sourceId === compareSourceB.id) {
+                      setCompareBId(getDifferentSourceId(predictionSources, sourceId));
+                    }
+                  }}
+                />
+                <PredictionSourceSelector
+                  label="b"
+                  sources={predictionSources}
+                  selectedId={compareSourceB.id}
+                  onSelect={setCompareBId}
+                />
+                <div className="comparison-mode-toggle" aria-label="Comparison mode">
+                  <button
+                    type="button"
+                    className={compareMode === "slider" ? "comparison-mode-button-active" : undefined}
+                    aria-pressed={compareMode === "slider"}
+                    onClick={() => setCompareMode("slider")}
+                  >
+                    slider
+                  </button>
+                  <button
+                    type="button"
+                    className={compareMode === "overlay" ? "comparison-mode-button-active" : undefined}
+                    aria-pressed={compareMode === "overlay"}
+                    onClick={() => setCompareMode("overlay")}
+                  >
+                    overlay
+                  </button>
+                </div>
+              </div>
             ) : null}
           </div>
         </div>
-        <BracketBoard
-          matches={displayMatches}
-          picks={visiblePicks}
-          activeMatchId={activeMatch?.id ?? null}
-          onActivateMatch={setActiveMatchId}
-          onClearActiveMatch={() => setActiveMatchId(null)}
-          onPick={handlePick}
-        />
+        {isNamePromptOpen ? (
+          <div className="prediction-name-dialog-backdrop" role="presentation">
+            <form
+              className="prediction-name-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="prediction-name-dialog-title"
+              onSubmit={submitNamePrompt}
+            >
+              <label className="prediction-name-dialog-field">
+                <span id="prediction-name-dialog-title">Enter your name</span>
+                <input
+                  type="text"
+                  value={nameDraft}
+                  maxLength={48}
+                  required
+                  autoFocus
+                  autoCapitalize="words"
+                  autoComplete="name"
+                  inputMode="text"
+                  aria-label="Prediction name"
+                  spellCheck={false}
+                  onChange={(event) => setNameDraft(event.target.value)}
+                />
+              </label>
+              <div className="prediction-name-dialog-actions">
+                <button type="button" className="prediction-name-dialog-button" onClick={cancelNamePrompt}>
+                  Cancel
+                </button>
+                <button type="submit" className="prediction-name-dialog-button prediction-name-dialog-primary">
+                  OK
+                </button>
+              </div>
+            </form>
+          </div>
+        ) : null}
+        {isCompareView ? (
+          <ComparisonBracket
+            matches={initialBracket.matches}
+            sourceA={compareSourceA}
+            sourceB={compareSourceB}
+            mode={compareMode}
+            split={comparisonSplit}
+            now={predictionNow}
+            activeMatchId={activeMatch?.id ?? null}
+            onSplitChange={setComparisonSplit}
+            onActivateMatch={setActiveMatchId}
+            onClearActiveMatch={() => setActiveMatchId(null)}
+          />
+        ) : (
+          <BracketBoard
+            matches={displayMatches}
+            picks={selectedSource.picks}
+            activeMatchId={activeMatch?.id ?? null}
+            onActivateMatch={setActiveMatchId}
+            onClearActiveMatch={() => setActiveMatchId(null)}
+            onPick={handlePick}
+          />
+        )}
       </section>
     </main>
   );
 }
 
-function PredictionViewerCombobox({
-  predictions,
+function PredictionSourceSelector({
+  label,
+  sources,
   selectedId,
   onSelect,
 }: {
-  predictions: PublicPrediction[];
+  label: string;
+  sources: PredictionSource[];
   selectedId: string;
-  onSelect: (predictionId: string) => void;
+  onSelect: (sourceId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const selectedPrediction = predictions.find((prediction) => prediction.id === selectedId);
-  const selectedLabel =
-    selectedId === CURRENT_STANDINGS_ID
-      ? "current standings"
-      : selectedPrediction?.displayName ?? "my bracket";
+  const selectedSource = resolvePredictionSource(sources, selectedId);
   const normalizedQuery = query.trim().toLowerCase();
-  const filteredPredictions = normalizedQuery
-    ? predictions.filter((prediction) => prediction.displayName.toLowerCase().includes(normalizedQuery))
-    : predictions;
+  const filteredSources = normalizedQuery
+    ? sources.filter((source) => source.label.toLowerCase().includes(normalizedQuery))
+    : sources;
+  const listboxId = `prediction-source-${label}-list`;
 
-  function selectPrediction(predictionId: string) {
-    onSelect(predictionId);
+  function selectSource(sourceId: string) {
+    onSelect(sourceId);
     setQuery("");
     setOpen(false);
   }
@@ -354,11 +522,11 @@ function PredictionViewerCombobox({
         className="prediction-combobox-trigger"
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label="View saved prediction"
+        aria-label={`${label} prediction source`}
         onClick={() => setOpen((current) => !current)}
       >
-        <span>view</span>
-        <strong>{selectedLabel}</strong>
+        <span>{label}</span>
+        <strong>{selectedSource.label}</strong>
         <span aria-hidden="true">v</span>
       </button>
 
@@ -370,33 +538,21 @@ function PredictionViewerCombobox({
             value={query}
             role="combobox"
             aria-expanded={open}
-            aria-controls="prediction-combobox-list"
-            aria-label="Search saved predictions"
+            aria-controls={listboxId}
+            aria-label={`Search ${label} prediction source`}
             placeholder="search"
             spellCheck={false}
             onChange={(event) => setQuery(event.target.value)}
           />
-          <div id="prediction-combobox-list" className="prediction-combobox-list" role="listbox">
-            <PredictionComboboxItem
-              id={OWN_PREDICTION_ID}
-              label="my bracket"
-              selected={selectedId === OWN_PREDICTION_ID}
-              onSelect={selectPrediction}
-            />
-            <PredictionComboboxItem
-              id={CURRENT_STANDINGS_ID}
-              label="current standings"
-              selected={selectedId === CURRENT_STANDINGS_ID}
-              onSelect={selectPrediction}
-            />
-            {filteredPredictions.length > 0 ? (
-              filteredPredictions.map((prediction) => (
+          <div id={listboxId} className="prediction-combobox-list" role="listbox">
+            {filteredSources.length > 0 ? (
+              filteredSources.map((source) => (
                 <PredictionComboboxItem
-                  key={prediction.id}
-                  id={prediction.id}
-                  label={prediction.displayName}
-                  selected={prediction.id === selectedId}
-                  onSelect={selectPrediction}
+                  key={source.id}
+                  id={source.id}
+                  label={source.label}
+                  selected={source.id === selectedSource.id}
+                  onSelect={selectSource}
                 />
               ))
             ) : (
