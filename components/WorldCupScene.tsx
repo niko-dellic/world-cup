@@ -27,7 +27,7 @@ type WorldCupSceneProps = {
 };
 
 const FLAG_BACKDROP_Z = -1.65;
-const EXIT_ANIMATION_MS = 900;
+const EXIT_ANIMATION_MS = 3000;
 
 export function WorldCupScene({ activeMatch }: WorldCupSceneProps) {
   const [renderMatch, setRenderMatch] = useState<DisplayMatch | null>(activeMatch);
@@ -59,16 +59,16 @@ export function WorldCupScene({ activeMatch }: WorldCupSceneProps) {
         gl={{ antialias: true, alpha: true }}
       >
         <color attach="background" args={["#050507"]} />
+        <SpeckleField />
         {hasMatch ? (
           <group key={`${renderMatch!.id}-${leftTeam!.id}-${rightTeam!.id}`}>
             <MassiveFlagBackdrop leftTeam={leftTeam!} rightTeam={rightTeam!} active={isActive} />
-            <EnergyField leftTeam={leftTeam!} rightTeam={rightTeam!} intensity={isActive ? 1 : 0} />
+            <EnergyField intensity={isActive ? 1 : 0} />
             <ambientLight intensity={0.6} />
-            <pointLight position={[-2.5, 1.8, 3]} intensity={14} color={leftTeam!.colors[0]} />
-            <pointLight position={[2.5, -1.4, 3]} intensity={14} color={rightTeam!.colors[0]} />
-            <SeamLightning leftTeam={leftTeam!} rightTeam={rightTeam!} active={isActive} />
+            <pointLight position={[-2.5, 1.8, 3]} intensity={8} color="#38bdf8" />
+            <pointLight position={[2.5, -1.4, 3]} intensity={8} color="#67e8f9" />
+            <SeamLightning active={isActive} />
             <ElectricArcs leftTeam={leftTeam!} rightTeam={rightTeam!} active={isActive} />
-            <ParticleField leftTeam={leftTeam!} rightTeam={rightTeam!} />
           </group>
         ) : null}
       </Canvas>
@@ -76,33 +76,19 @@ export function WorldCupScene({ activeMatch }: WorldCupSceneProps) {
   );
 }
 
-function EnergyField({
-  leftTeam,
-  rightTeam,
-  intensity,
-}: {
-  leftTeam: Team;
-  rightTeam: Team;
-  intensity: number;
-}) {
+function EnergyField({ intensity }: { intensity: number }) {
   const materialRef = useRef<ShaderMaterial>(null);
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },
       uIntensity: { value: intensity },
-      uLeft: { value: new Color(leftTeam.colors[0]) },
-      uRight: { value: new Color(rightTeam.colors[0]) },
-      uAccent: { value: new Color(rightTeam.colors[1]) },
     }),
-    [leftTeam.colors, rightTeam.colors],
+    [],
   );
 
   useFrame(({ clock }) => {
     uniforms.uTime.value = clock.elapsedTime;
-    uniforms.uIntensity.value += (intensity - uniforms.uIntensity.value) * 0.08;
-    materialRef.current?.uniforms.uLeft.value.set(leftTeam.colors[0]);
-    materialRef.current?.uniforms.uRight.value.set(rightTeam.colors[0]);
-    materialRef.current?.uniforms.uAccent.value.set(rightTeam.colors[1]);
+    uniforms.uIntensity.value += (intensity - uniforms.uIntensity.value) * (intensity > 0 ? 0.08 : 0.04);
   });
 
   return (
@@ -170,7 +156,7 @@ function MassiveFlagPanel({ team, side, active }: { team: Team; side: "left" | "
 
   useFrame(({ clock }, delta) => {
     if (!meshRef.current) return;
-    const motion = active ? delta * 2.75 : -delta * 2.4;
+    const motion = active ? delta * 2.75 : -delta * 0.85;
     progressRef.current = Math.min(1, Math.max(0, progressRef.current + motion));
     const eased = easeSmooth(progressRef.current);
     const startX = direction * flagViewport.width * 0.86;
@@ -204,32 +190,20 @@ function MassiveFlagPanel({ team, side, active }: { team: Team; side: "left" | "
   );
 }
 
-function SeamLightning({
-  leftTeam,
-  rightTeam,
-  active,
-}: {
-  leftTeam: Team;
-  rightTeam: Team;
-  active: boolean;
-}) {
+function SeamLightning({ active }: { active: boolean }) {
   const viewport = useThree((state) => state.viewport);
   const materialRef = useRef<ShaderMaterial>(null);
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },
       uIntensity: { value: active ? 1 : 0.62 },
-      uLeft: { value: new Color(leftTeam.colors[1]) },
-      uRight: { value: new Color(rightTeam.colors[1]) },
     }),
-    [leftTeam.colors, rightTeam.colors],
+    [],
   );
 
   useFrame(({ clock }) => {
     uniforms.uTime.value = clock.elapsedTime;
-    uniforms.uIntensity.value += ((active ? 1 : 0) - uniforms.uIntensity.value) * 0.08;
-    materialRef.current?.uniforms.uLeft.value.set(leftTeam.colors[1]);
-    materialRef.current?.uniforms.uRight.value.set(rightTeam.colors[1]);
+    uniforms.uIntensity.value += ((active ? 1 : 0) - uniforms.uIntensity.value) * (active ? 0.08 : 0.04);
   });
 
   return (
@@ -298,9 +272,9 @@ function ElectricArcs({
   );
 }
 
-function ParticleField({ leftTeam, rightTeam }: { leftTeam: Team; rightTeam: Team }) {
+function SpeckleField() {
   const pointsRef = useRef<Points>(null);
-  const { geometry } = useMemo(() => createParticleGeometry(leftTeam, rightTeam), [leftTeam, rightTeam]);
+  const { geometry } = useMemo(() => createSpeckleGeometry(), []);
 
   useEffect(() => {
     return () => geometry.dispose();
@@ -313,7 +287,7 @@ function ParticleField({ leftTeam, rightTeam }: { leftTeam: Team; rightTeam: Tea
   });
 
   return (
-    <points ref={pointsRef} geometry={geometry} position={[0, 0, -0.4]}>
+    <points ref={pointsRef} geometry={geometry} position={[0, 0, -0.35]}>
       <pointsMaterial
         vertexColors
         size={0.035}
@@ -467,7 +441,7 @@ function createArcLines(count: number, leftTeam: Team, rightTeam: Team, active: 
     const geometry = new BufferGeometry();
     geometry.setAttribute("position", new Float32BufferAttribute(points, 3));
     const material = new LineBasicMaterial({
-      color: index % 2 === 0 ? leftTeam.colors[1] : rightTeam.colors[1],
+      color: index % 3 === 0 ? "#f8fdff" : index % 3 === 1 ? "#67e8f9" : "#2563eb",
       transparent: true,
       opacity: active ? 0.82 : 0.32,
       blending: AdditiveBlending,
@@ -476,13 +450,13 @@ function createArcLines(count: number, leftTeam: Team, rightTeam: Team, active: 
   });
 }
 
-function createParticleGeometry(leftTeam: Team, rightTeam: Team) {
-  const count = 520;
+function createSpeckleGeometry() {
+  const count = 620;
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
-  const left = new Color(leftTeam.colors[0]);
-  const right = new Color(rightTeam.colors[0]);
-  const accent = new Color(rightTeam.colors[1]);
+  const left = new Color("#bae6fd");
+  const right = new Color("#22d3ee");
+  const accent = new Color("#ffffff");
 
   for (let i = 0; i < count; i += 1) {
     const radius = 1.2 + Math.random() * 4.8;
@@ -535,9 +509,6 @@ const energyVertexShader = `
 const energyFragmentShader = `
   uniform float uTime;
   uniform float uIntensity;
-  uniform vec3 uLeft;
-  uniform vec3 uRight;
-  uniform vec3 uAccent;
   varying vec2 vUv;
 
   float hash(vec2 p) {
@@ -558,16 +529,39 @@ const energyFragmentShader = `
   void main() {
     vec2 uv = vUv;
     vec2 centered = uv - 0.5;
-    float radial = 1.0 - smoothstep(0.05, 0.72, length(centered));
-    float beam = pow(1.0 - abs(centered.x * 2.0), 3.0);
+    float seam = pow(1.0 - smoothstep(0.0, 0.46, abs(centered.x)), 2.2);
+    float radial = 1.0 - smoothstep(0.05, 0.68, length(centered));
     float wave = noise(uv * 8.0 + vec2(uTime * 0.7, -uTime * 0.35));
-    float lightning = smoothstep(0.68, 0.98, sin((uv.y + wave * 0.28) * 34.0 + uTime * 6.0));
-    vec3 base = mix(uLeft, uRight, uv.x);
-    vec3 color = base * (0.16 + radial * 0.42);
-    color += uAccent * beam * (0.34 + uIntensity * 0.42);
-    color += vec3(1.0) * lightning * beam * uIntensity * 0.38;
-    color += base * wave * 0.18;
-    gl_FragColor = vec4(color, 0.92 * uIntensity);
+    float lightning = smoothstep(0.72, 0.98, sin((uv.y + wave * 0.26) * 34.0 + uTime * 6.0));
+    vec3 color = vec3(0.02, 0.16, 0.32) * seam * 0.44;
+    color += vec3(0.02, 0.55, 0.9) * radial * seam * 0.36;
+    color += vec3(0.35, 0.95, 1.0) * lightning * seam * 0.28;
+    gl_FragColor = vec4(color, seam * 0.48 * uIntensity);
+  }
+`;
+
+const seamShapeGlsl = `
+  float seamHash(vec2 p) {
+    return fract(sin(dot(p, vec2(269.5, 183.3))) * 43758.5453123);
+  }
+
+  float seamNoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    float a = seamHash(i);
+    float b = seamHash(i + vec2(1.0, 0.0));
+    float c = seamHash(i + vec2(0.0, 1.0));
+    float d = seamHash(i + vec2(1.0, 1.0));
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+  }
+
+  float seamOffset(float y, float time) {
+    float offset = (y - 0.5) * 0.18;
+    offset += sin(y * 24.0 + time * 8.6) * 0.052;
+    offset += sin(y * 51.0 - time * 6.2) * 0.026;
+    offset += (seamNoise(vec2(y * 13.0, time * 2.2)) - 0.5) * 0.07;
+    return clamp(offset, -0.16, 0.16);
   }
 `;
 
@@ -605,37 +599,19 @@ const flagFragmentShader = `
   uniform float uProgress;
   varying vec2 vUv;
   varying float vWave;
-
-  float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(41.7, 289.1))) * 43758.5453123);
-  }
-
-  float noise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    float a = hash(i);
-    float b = hash(i + vec2(1.0, 0.0));
-    float c = hash(i + vec2(0.0, 1.0));
-    float d = hash(i + vec2(1.0, 1.0));
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
-  }
+  ${seamShapeGlsl}
 
   void main() {
     vec2 coverUv = vUv * uRepeat + uOffset;
     vec4 flag = texture2D(uMap, coverUv);
     float seamDistance = uSide < 0.0 ? 1.0 - vUv.x : vUv.x;
-    float diagonal = (vUv.y - 0.5) * 0.38 * -uSide;
-    float jagged = sin(vUv.y * 24.0 + uTime * 9.2) * 0.036;
-    jagged += sin(vUv.y * 53.0 - uTime * 6.4) * 0.021;
-    jagged += (noise(vec2(vUv.y * 14.0, uTime * 2.4)) - 0.5) * 0.058;
-    float cutWidth = clamp(0.07 + diagonal + jagged, -0.13, 0.31);
+    float sharedOffset = seamOffset(vUv.y, uTime);
+    float cutWidth = clamp(0.075 + uSide * sharedOffset, 0.018, 0.24);
     float lightningMask = smoothstep(cutWidth, cutWidth + 0.035, seamDistance);
     float edgeGlow = 1.0 - smoothstep(0.0, 0.13, abs(seamDistance - cutWidth));
     float gustShade = 1.0 + vWave * 2.2;
     flag.rgb *= gustShade;
-    flag.rgb += vec3(0.08, 0.95, 1.0) * edgeGlow * 0.58 * uProgress;
-    flag.rgb += vec3(1.0, 0.12, 0.72) * (1.0 - lightningMask) * 0.34 * uProgress;
+    flag.rgb += vec3(0.08, 0.92, 1.0) * edgeGlow * 0.42 * uProgress;
     flag.a *= lightningMask * uProgress;
     gl_FragColor = flag;
   }
@@ -644,47 +620,25 @@ const flagFragmentShader = `
 const seamFragmentShader = `
   uniform float uTime;
   uniform float uIntensity;
-  uniform vec3 uLeft;
-  uniform vec3 uRight;
   varying vec2 vUv;
-
-  float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(269.5, 183.3))) * 43758.5453123);
-  }
-
-  float noise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    float a = hash(i);
-    float b = hash(i + vec2(1.0, 0.0));
-    float c = hash(i + vec2(0.0, 1.0));
-    float d = hash(i + vec2(1.0, 1.0));
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
-  }
+  ${seamShapeGlsl}
 
   void main() {
     vec2 uv = vUv;
-    float boltPath = 0.5
-      + (uv.y - 0.5) * 0.54
-      + sin(uv.y * 24.0 + uTime * 8.6) * 0.13
-      + sin(uv.y * 51.0 - uTime * 6.2) * 0.06
-      + (noise(vec2(uv.y * 13.0, uTime * 2.2)) - 0.5) * 0.2;
+    float boltPath = 0.5 + seamOffset(uv.y, uTime);
     float dist = abs(uv.x - boltPath);
     float core = smoothstep(0.055, 0.0, dist);
     float glow = smoothstep(0.42, 0.0, dist);
     float branches = smoothstep(
       0.78,
       1.0,
-      sin((uv.x + uv.y) * 46.0 + noise(uv * 18.0) * 8.0 + uTime * 11.0)
+      sin((uv.x + uv.y) * 46.0 + seamNoise(uv * 18.0) * 8.0 + uTime * 11.0)
     );
     branches *= smoothstep(0.48, 0.0, abs(uv.x - boltPath));
-    vec3 heat = mix(uLeft, uRight, uv.y);
-    vec3 color = vec3(1.0) * core * 1.9;
-    color += vec3(0.28, 0.95, 1.0) * glow * 0.85;
-    color += heat * glow * 0.74;
-    color += vec3(1.0, 0.92, 0.35) * branches * 0.55;
-    float alpha = clamp((core + glow * 0.72 + branches * 0.32) * uIntensity, 0.0, 1.0);
+    vec3 color = vec3(0.72, 0.96, 1.0) * core * 1.25;
+    color += vec3(0.08, 0.72, 1.0) * glow * 0.98;
+    color += vec3(0.05, 0.22, 1.0) * branches * 0.64;
+    float alpha = clamp((core * 0.92 + glow * 0.58 + branches * 0.26) * uIntensity, 0.0, 1.0);
     gl_FragColor = vec4(color, alpha);
   }
 `;

@@ -3,7 +3,12 @@
 import clsx from "clsx";
 import type { CSSProperties } from "react";
 import { getSelectableTeams } from "@/lib/bracket";
-import type { BracketRound, DisplayMatch, PredictionPicks, Team } from "@/lib/types";
+import {
+  buildBracketGridLayout,
+  type BracketConnectorLayout,
+  type BracketNodeLayout,
+} from "@/lib/bracket-layout";
+import type { DisplayMatch, PredictionPicks, Team } from "@/lib/types";
 
 type BracketBoardProps = {
   matches: DisplayMatch[];
@@ -14,43 +19,6 @@ type BracketBoardProps = {
   onPick: (match: DisplayMatch, teamId: string) => void;
 };
 
-type NodeSide = "left" | "right" | "center";
-type NodeKind = "outer" | "winner" | "final";
-
-type NodeLayout = {
-  x: number;
-  y: number;
-  width: number;
-  kind: NodeKind;
-  side: NodeSide;
-};
-
-const X = {
-  leftOuter: 10,
-  leftR16: 25,
-  leftQf: 36.5,
-  leftSf: 45,
-  final: 50,
-  rightSf: 55,
-  rightQf: 63.5,
-  rightR16: 75,
-  rightOuter: 90,
-};
-
-const NODE_WIDTH = {
-  outer: 10.8,
-  winner: 4.8,
-  final: 5.4,
-};
-
-const Y = {
-  r32: (slot: number) => [6, 19, 32, 45, 55, 68, 81, 94][slot - 1] ?? 50,
-  r16: (slot: number) => [12.5, 38.5, 61.5, 87.5][slot - 1] ?? 50,
-  qf: (slot: number) => (slot === 1 ? 25 : 75),
-  sf: 50,
-  final: 50,
-};
-
 export function BracketBoard({
   matches,
   picks,
@@ -59,15 +27,29 @@ export function BracketBoard({
   onClearActiveMatch,
   onPick,
 }: BracketBoardProps) {
-  const nodes = matches
-    .map((match) => ({ match, layout: getNodeLayout(match) }))
-    .filter((node): node is { match: DisplayMatch; layout: NodeLayout } => Boolean(node.layout));
+  const layout = buildBracketGridLayout(matches);
+  const matchesById = new Map(matches.map((match) => [match.id, match]));
 
   return (
     <div
       className="terminal-bracket"
       tabIndex={0}
       aria-label="World Cup knockout bracket"
+      onMouseMove={(event) => {
+        if (!(event.target as HTMLElement).closest(".terminal-node")) {
+          onClearActiveMatch();
+        }
+      }}
+      onPointerMove={(event) => {
+        if (!(event.target as HTMLElement).closest(".terminal-node")) {
+          onClearActiveMatch();
+        }
+      }}
+      onClick={(event) => {
+        if (!(event.target as HTMLElement).closest(".terminal-node")) {
+          onClearActiveMatch();
+        }
+      }}
       onMouseLeave={onClearActiveMatch}
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) {
@@ -75,27 +57,56 @@ export function BracketBoard({
         }
       }}
     >
-      <svg className="bracket-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-        {buildConnectorPaths().map((path, index) => (
-          <path key={index} d={path} />
-        ))}
-      </svg>
-
-      {nodes.map(({ match, layout }) => (
-        <TerminalNode
-          key={match.id}
-          match={match}
-          layout={layout}
-          selectedTeamId={picks[match.id] ?? null}
-          isActive={match.id === activeMatchId}
-          onActivate={() => onActivateMatch(match.id)}
-          onPick={(teamId) => onPick(match, teamId)}
-        />
+      {layout.connectors.map((connector) => (
+        <ConnectorCell key={connector.key} connector={connector} />
       ))}
 
-      <div className="final-label" aria-hidden="true">
-        Final
-      </div>
+      {layout.nodes.map((node) => {
+        const match = matchesById.get(node.matchId);
+        if (!match) return null;
+
+        return (
+          <TerminalNode
+            key={node.key}
+            match={match}
+            layout={node}
+            selectedTeamId={picks[match.id] ?? null}
+            isActive={match.id === activeMatchId}
+            onActivate={() => onActivateMatch(match.id)}
+            onDeactivate={onClearActiveMatch}
+            onPick={(teamId) => onPick(match, teamId)}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function ConnectorCell({ connector }: { connector: BracketConnectorLayout }) {
+  return (
+    <div
+      className={clsx(
+        "bracket-connector",
+        `bracket-connector-${connector.side}`,
+        `bracket-connector-${connector.kind}`,
+      )}
+      style={gridPlacement(connector)}
+      data-side={connector.side}
+      data-stage={connector.stage}
+      data-target-slot={connector.targetMatchSlot}
+      data-source-slots={connector.sourceMatchSlots.join(",")}
+      aria-hidden="true"
+    >
+      {connector.kind === "merge" ? (
+        <>
+          <span className="connector-segment connector-source-top" />
+          <span className="connector-segment connector-source-bottom" />
+          <span className="connector-segment connector-vertical" />
+          <span className="connector-segment connector-output" />
+        </>
+      ) : (
+        <span className="connector-segment connector-single-line" />
+      )}
     </div>
   );
 }
@@ -106,13 +117,15 @@ function TerminalNode({
   selectedTeamId,
   isActive,
   onActivate,
+  onDeactivate,
   onPick,
 }: {
   match: DisplayMatch;
-  layout: NodeLayout;
+  layout: BracketNodeLayout;
   selectedTeamId: string | null;
   isActive: boolean;
   onActivate: () => void;
+  onDeactivate: () => void;
   onPick: (teamId: string) => void;
 }) {
   const selectableTeams = getSelectableTeams(match);
@@ -130,6 +143,18 @@ function TerminalNode({
     if (nextTeam) onPick(nextTeam.id);
   }
 
+  const winnerButton = (
+    <button
+      type="button"
+      className={clsx("winner-node", winner && "winner-node-picked")}
+      aria-disabled={!canPick}
+      onClick={cyclePick}
+      aria-label={`${match.roundName} match ${match.slot}`}
+    >
+      {winner ? <TeamToken team={winner} /> : <span className="tbd-token">TBD</span>}
+    </button>
+  );
+
   return (
     <div
       className={clsx(
@@ -138,24 +163,30 @@ function TerminalNode({
         `terminal-node-${layout.side}`,
         isActive && "terminal-node-active",
       )}
-      style={{ "--x": layout.x, "--y": layout.y, "--node-w": layout.width } as CSSProperties}
+      style={gridPlacement(layout)}
+      data-round={layout.round}
+      data-slot={layout.slot}
+      data-local-slot={layout.localSlot}
       onMouseEnter={onActivate}
       onPointerEnter={onActivate}
+      onMouseMove={onActivate}
+      onPointerMove={onActivate}
+      onMouseLeave={onDeactivate}
+      onPointerLeave={onDeactivate}
       onFocus={onActivate}
       onClick={onActivate}
     >
       {layout.kind === "outer" ? (
         <OuterMatchNode match={match} selectedTeamId={selectedTeamId} onPick={onPick} />
+      ) : layout.kind === "final" ? (
+        <div className="final-stack">
+          <span className="final-label" aria-hidden="true">
+            Final
+          </span>
+          {winnerButton}
+        </div>
       ) : (
-        <button
-          type="button"
-          className={clsx("winner-node", winner && "winner-node-picked")}
-          disabled={!canPick}
-          onClick={cyclePick}
-          aria-label={`${match.roundName} match ${match.slot}`}
-        >
-          {winner ? <TeamToken team={winner} /> : <span className="tbd-token">TBD</span>}
-        </button>
+        winnerButton
       )}
     </div>
   );
@@ -178,7 +209,6 @@ function OuterMatchNode({
         locked={match.isLocked}
         onPick={onPick}
       />
-      <span className="vs-token">vs</span>
       <TeamPickButton
         team={match.displayAwayTeam}
         selectedTeamId={selectedTeamId}
@@ -204,10 +234,13 @@ function TeamPickButton({
     <button
       type="button"
       className={clsx("team-token-button", team?.id === selectedTeamId && "team-token-selected")}
-      disabled={!team || locked}
+      disabled={!team}
+      aria-disabled={!team || locked}
       onClick={() => {
-        if (team) onPick(team.id);
+        if (team && !locked) onPick(team.id);
       }}
+      aria-label={team ? team.name : "Unknown team"}
+      title={team?.name}
     >
       {team ? <TeamToken team={team} /> : <span className="unknown-token">?</span>}
     </button>
@@ -225,124 +258,9 @@ function TeamToken({ team }: { team: Team }) {
   );
 }
 
-function getNodeLayout(match: DisplayMatch): NodeLayout | null {
-  if (match.round === "round-of-32") {
-    if (match.slot <= 8) {
-      return sideLayout("left", "round-of-32", match.slot);
-    }
-    return sideLayout("right", "round-of-32", match.slot - 8);
-  }
-
-  if (match.round === "round-of-16") {
-    if (match.slot <= 4) {
-      return sideLayout("left", "round-of-16", match.slot);
-    }
-    return sideLayout("right", "round-of-16", match.slot - 4);
-  }
-
-  if (match.round === "quarterfinals") {
-    if (match.slot <= 2) {
-      return sideLayout("left", "quarterfinals", match.slot);
-    }
-    return sideLayout("right", "quarterfinals", match.slot - 2);
-  }
-
-  if (match.round === "semifinals") {
-    return sideLayout(match.slot === 1 ? "left" : "right", "semifinals", 1);
-  }
-
-  if (match.round === "final") {
-    return finalLayout();
-  }
-
-  return null;
-}
-
-function sideLayout(side: "left" | "right", round: BracketRound, slot: number): NodeLayout {
-  if (round === "round-of-32") {
-    return {
-      x: side === "left" ? X.leftOuter : X.rightOuter,
-      y: Y.r32(slot),
-      width: NODE_WIDTH.outer,
-      kind: "outer",
-      side,
-    };
-  }
-
-  if (round === "round-of-16") {
-    return {
-      x: side === "left" ? X.leftR16 : X.rightR16,
-      y: Y.r16(slot),
-      width: NODE_WIDTH.winner,
-      kind: "winner",
-      side,
-    };
-  }
-
-  if (round === "quarterfinals") {
-    return {
-      x: side === "left" ? X.leftQf : X.rightQf,
-      y: Y.qf(slot),
-      width: NODE_WIDTH.winner,
-      kind: "winner",
-      side,
-    };
-  }
-
+function gridPlacement(layout: Pick<BracketNodeLayout | BracketConnectorLayout, "column" | "rowStart" | "rowSpan">) {
   return {
-    x: side === "left" ? X.leftSf : X.rightSf,
-    y: Y.sf,
-    width: NODE_WIDTH.winner,
-    kind: "winner",
-    side,
-  };
-}
-
-function buildConnectorPaths() {
-  const paths: string[] = [];
-
-  addRoundPaths(paths, "left", "round-of-32", "round-of-16");
-  addRoundPaths(paths, "left", "round-of-16", "quarterfinals");
-  addRoundPaths(paths, "left", "quarterfinals", "semifinals");
-  paths.push(connectionPath(sideLayout("left", "semifinals", 1), finalLayout(), "left"));
-
-  addRoundPaths(paths, "right", "round-of-32", "round-of-16");
-  addRoundPaths(paths, "right", "round-of-16", "quarterfinals");
-  addRoundPaths(paths, "right", "quarterfinals", "semifinals");
-  paths.push(connectionPath(sideLayout("right", "semifinals", 1), finalLayout(), "right"));
-
-  return paths;
-}
-
-function finalLayout(): NodeLayout {
-  return { x: X.final, y: Y.final, width: NODE_WIDTH.final, kind: "final", side: "center" };
-}
-
-function addRoundPaths(
-  paths: string[],
-  side: "left" | "right",
-  fromRound: BracketRound,
-  toRound: BracketRound,
-) {
-  const targets =
-    toRound === "round-of-16"
-      ? [1, 2, 3, 4]
-      : toRound === "quarterfinals"
-        ? [1, 2]
-        : [1];
-
-  for (const targetSlot of targets) {
-    const target = sideLayout(side, toRound, targetSlot);
-    const sourceOne = sideLayout(side, fromRound, (targetSlot - 1) * 2 + 1);
-    const sourceTwo = sideLayout(side, fromRound, (targetSlot - 1) * 2 + 2);
-    paths.push(connectionPath(sourceOne, target, side));
-    paths.push(connectionPath(sourceTwo, target, side));
-  }
-}
-
-function connectionPath(source: NodeLayout, target: NodeLayout, side: "left" | "right") {
-  const startX = source.x + (side === "left" ? source.width / 2 : -source.width / 2);
-  const endX = target.x + (side === "left" ? -target.width / 2 : target.width / 2);
-  const elbowX = (startX + endX) / 2;
-  return `M ${startX} ${source.y} H ${elbowX} V ${target.y} H ${endX}`;
+    gridColumn: layout.column,
+    gridRow: `${layout.rowStart} / span ${layout.rowSpan}`,
+  } satisfies CSSProperties;
 }
