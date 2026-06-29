@@ -32,7 +32,7 @@ export default async function LeaderboardPage() {
                   <div className="lofi-entry-meta">
                     <span>
                       correct {entry.correctPicks}
-                      {entry.possiblePoints > 0 ? `/${entry.possiblePoints}` : ""}
+                      {entry.possiblePicks > 0 ? `/${entry.possiblePicks}` : ""}
                     </span>
                     {entry.championPick ? <span>champion {entry.championPick.name}</span> : null}
                   </div>

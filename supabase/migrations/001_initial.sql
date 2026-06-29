@@ -35,6 +35,7 @@ create table if not exists public.prediction_brackets (
   user_id uuid not null references auth.users(id) on delete cascade,
   display_name text not null default 'Anonymous' check (char_length(display_name) between 1 and 48),
   picks jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (user_id)
 );

@@ -11,6 +11,7 @@ export async function GET() {
       id: prediction.id ?? prediction.userId,
       displayName: prediction.displayName,
       picks: prediction.picks,
+      submittedAt: prediction.submittedAt,
       updatedAt: prediction.updatedAt,
     })),
   });

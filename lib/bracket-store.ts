@@ -3,6 +3,7 @@ import "server-only";
 import type { BracketData, Match, PredictionBracket, Team } from "@/lib/types";
 import { createWorldCup2026Bracket } from "@/lib/seed-data";
 import { fetchWorldCupBracket } from "@/lib/providers/fotmob";
+import { LEGACY_PREDICTION_SUBMITTED_AT } from "@/lib/prediction-submission";
 import { createSupabaseAdminClient, createSupabaseReadClient } from "@/lib/supabase/server";
 
 type TeamRow = {
@@ -42,8 +43,13 @@ type PredictionRow = {
   user_id: string;
   display_name: string | null;
   picks: Record<string, string | null | undefined>;
+  created_at?: string | null;
   updated_at: string;
 };
+
+const PREDICTION_COLUMNS = "id,user_id,display_name,picks,updated_at";
+const PREDICTION_COLUMNS_WITH_CREATED_AT =
+  "id,user_id,display_name,picks,created_at,updated_at";
 
 export async function getBracketData(): Promise<BracketData> {
   const supabase = createSupabaseReadClient();
@@ -148,10 +154,21 @@ export async function getPredictionRows(): Promise<PredictionBracket[]> {
   const supabase = createSupabaseAdminClient() ?? createSupabaseReadClient();
   if (!supabase) return [];
 
-  const { data, error } = await supabase
+  const withSubmittedAt = await supabase
     .from("prediction_brackets")
-    .select("id,user_id,display_name,picks,updated_at")
+    .select(PREDICTION_COLUMNS_WITH_CREATED_AT)
     .order("updated_at", { ascending: true });
+  let data = withSubmittedAt.data as PredictionRow[] | null;
+  let error = withSubmittedAt.error;
+
+  if (isMissingCreatedAtError(error)) {
+    const fallback = await supabase
+      .from("prediction_brackets")
+      .select(PREDICTION_COLUMNS)
+      .order("updated_at", { ascending: true });
+    data = fallback.data as PredictionRow[] | null;
+    error = fallback.error;
+  }
 
   if (error || !data) return [];
 
@@ -160,8 +177,18 @@ export async function getPredictionRows(): Promise<PredictionBracket[]> {
     userId: row.user_id,
     displayName: row.display_name?.trim() || "Anonymous",
     picks: row.picks ?? {},
+    submittedAt: row.created_at ?? LEGACY_PREDICTION_SUBMITTED_AT,
     updatedAt: row.updated_at,
   }));
+}
+
+function isMissingCreatedAtError(error: { code?: string; details?: string | null; message?: string } | null) {
+  if (!error) return false;
+  const errorText = `${error.code ?? ""} ${error.details ?? ""} ${error.message ?? ""}`.toLowerCase();
+  return (
+    errorText.includes("created_at") &&
+    (error.code === "42703" || errorText.includes("could not find") || errorText.includes("does not exist"))
+  );
 }
 
 function collectTeams(matches: Match[]): Team[] {

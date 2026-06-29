@@ -189,14 +189,40 @@ export function applyPick(
   return sanitizePicks(matches, nextPicks, now);
 }
 
-export function scorePrediction(matches: Match[], picks: PredictionPicks) {
+function parseTimestamp(value: string | Date | null | undefined): number | null {
+  if (!value) return null;
+  const time = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  return Number.isFinite(time) ? time : null;
+}
+
+function wasMatchOpenWhenSubmitted(match: Match, submittedAt: string | Date | null | undefined) {
+  const submittedTime = parseTimestamp(submittedAt);
+  if (submittedTime === null || !match.kickoffTime) return true;
+
+  const kickoffTime = parseTimestamp(match.kickoffTime);
+  if (kickoffTime === null) return true;
+
+  return submittedTime < kickoffTime;
+}
+
+export function scorePrediction(
+  matches: Match[],
+  picks: PredictionPicks,
+  submittedAt?: string | Date | null,
+) {
   let points = 0;
   let correctPicks = 0;
+  let possiblePicks = 0;
   let possiblePoints = 0;
 
   for (const match of matches) {
     const weight = ROUND_WEIGHTS[match.round];
-    if (match.status === "completed" && match.winnerTeamId) {
+    if (
+      match.status === "completed" &&
+      match.winnerTeamId &&
+      wasMatchOpenWhenSubmitted(match, submittedAt)
+    ) {
+      possiblePicks += 1;
       possiblePoints += weight;
       if (picks[match.id] === match.winnerTeamId) {
         points += weight;
@@ -205,7 +231,7 @@ export function scorePrediction(matches: Match[], picks: PredictionPicks) {
     }
   }
 
-  return { points, correctPicks, possiblePoints };
+  return { points, correctPicks, possiblePicks, possiblePoints };
 }
 
 export function computeLeaderboard(
@@ -219,7 +245,8 @@ export function computeLeaderboard(
     : null;
 
   const entries = predictions.map((prediction) => {
-    const score = scorePrediction(matches, prediction.picks);
+    const submittedAt = prediction.submittedAt ?? prediction.updatedAt;
+    const score = scorePrediction(matches, prediction.picks, submittedAt);
     const championPick = finalDisplayMatch
       ? findTeamInMatch(finalDisplayMatch, prediction.picks[finalDisplayMatch.id])
       : null;
@@ -228,6 +255,7 @@ export function computeLeaderboard(
       rank: 0,
       userId: prediction.userId,
       displayName: prediction.displayName,
+      submittedAt,
       updatedAt: prediction.updatedAt,
       championPick,
       ...score,

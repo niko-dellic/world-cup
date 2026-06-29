@@ -7,6 +7,7 @@ import {
   sanitizePicks,
   scorePrediction,
 } from "@/lib/bracket";
+import { LEGACY_PREDICTION_SUBMITTED_AT } from "@/lib/prediction-submission";
 import { createSeedBracket } from "@/lib/seed-data";
 
 describe("bracket prediction logic", () => {
@@ -133,7 +134,34 @@ describe("bracket prediction logic", () => {
       m104: "wrong-finalist",
     });
 
-    expect(score).toEqual({ points: 1, correctPicks: 1, possiblePoints: 17 });
+    expect(score).toEqual({ points: 1, correctPicks: 1, possiblePicks: 2, possiblePoints: 17 });
+  });
+
+  it("only scores completed matches that were open when the prediction was submitted", () => {
+    const matches = createSeedBracket().matches.map((match) => {
+      if (match.id === "m76") {
+        return {
+          ...match,
+          status: "completed" as const,
+          winnerTeamId: "brazil",
+          homeScore: 2,
+          awayScore: 1,
+        };
+      }
+
+      return match;
+    });
+
+    const score = scorePrediction(
+      matches,
+      {
+        m73: "canada",
+        m76: "brazil",
+      },
+      LEGACY_PREDICTION_SUBMITTED_AT,
+    );
+
+    expect(score).toEqual({ points: 1, correctPicks: 1, possiblePicks: 1, possiblePoints: 1 });
   });
 
   it("orders leaderboard by points, then correct picks, then oldest update", () => {

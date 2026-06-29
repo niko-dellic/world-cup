@@ -289,6 +289,37 @@ a {
   outline: none;
 }
 
+.prediction-submit-button,
+.prediction-submit-status {
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.prediction-submit-button {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.prediction-submit-button:hover,
+.prediction-submit-button:focus-visible {
+  color: #20f7f7;
+  outline: none;
+}
+
+.prediction-submit-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.prediction-submit-status {
+  color: #ff6b7f;
+}
+
 .prediction-viewer-combobox {
   position: relative;
   min-width: 0;

@@ -60,6 +60,7 @@ export type PredictionBracket = {
   userId: string;
   displayName: string;
   picks: PredictionPicks;
+  submittedAt?: string;
   updatedAt: string;
 };
 
@@ -69,8 +70,10 @@ export type LeaderboardEntry = {
   displayName: string;
   points: number;
   correctPicks: number;
+  possiblePicks: number;
   possiblePoints: number;
   championPick: Team | null;
+  submittedAt: string;
   updatedAt: string;
 };
 

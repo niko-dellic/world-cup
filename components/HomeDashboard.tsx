@@ -41,6 +41,7 @@ type PublicPrediction = {
   id: string;
   displayName: string;
   picks: PredictionPicks;
+  submittedAt?: string;
   updatedAt: string;
 };
 
@@ -50,6 +51,7 @@ type PendingPick = {
 };
 
 type BracketViewMode = "current" | "predictions" | "compare";
+type SubmitStatus = "idle" | "saving" | "saved" | "error";
 
 export function HomeDashboard({ initialBracket }: { initialBracket: BracketData }) {
   const { layoutMode } = useBracketLayoutPreference();
@@ -68,6 +70,8 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
   const [comparisonSplit, setComparisonSplit] = useState(50);
   const [predictionLoaded, setPredictionLoaded] = useState(false);
   const [remotePersistenceAvailable, setRemotePersistenceAvailable] = useState(isSupabaseConfigured);
+  const [submitStatus, setSubmitStatus] = useState<SubmitStatus>("idle");
+  const [submitAfterName, setSubmitAfterName] = useState(false);
   const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
   const predictionNow = initialBracket.source === "seeded" ? SEEDED_DEMO_NOW : undefined;
   const predictionSources = useMemo(
@@ -180,24 +184,12 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
     const cleanDisplayName = normalizeDisplayName(displayName);
     const prediction = { displayName: cleanDisplayName ?? undefined, picks, started: hasStartedPrediction };
     writeLocalPrediction(prediction);
+  }, [displayName, hasStartedPrediction, picks, predictionLoaded]);
 
-    if (!hasStartedPrediction || !cleanDisplayName) return undefined;
-    if (!remotePersistenceAvailable) return undefined;
-
-    let cancelled = false;
-    const timeout = window.setTimeout(() => {
-      void saveRemotePrediction(prediction).then((saved) => {
-        if (!saved && !cancelled) {
-          setRemotePersistenceAvailable(false);
-        }
-      });
-    }, 350);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeout);
-    };
-  }, [displayName, hasStartedPrediction, picks, predictionLoaded, remotePersistenceAvailable]);
+  useEffect(() => {
+    if (!predictionLoaded) return;
+    setSubmitStatus("idle");
+  }, [displayName, picks, predictionLoaded]);
 
   useEffect(() => {
     let cancelled = false;
@@ -274,22 +266,35 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
     event.preventDefault();
     const nextDisplayName = normalizeDisplayName(nameDraft);
     if (!nextDisplayName) return;
+    const nextPicks = pendingPick
+      ? applyPick(initialBracket.matches, picks, pendingPick.matchId, pendingPick.teamId, predictionNow)
+      : picks;
+    const shouldSubmit = submitAfterName;
 
     setDisplayName(nextDisplayName);
     setHasStartedPrediction(true);
     setIsNamePromptOpen(false);
     setSelectedPredictionId(OWN_PREDICTION_SOURCE_ID);
+    setSubmitAfterName(false);
 
     if (pendingPick) {
-      const { matchId, teamId } = pendingPick;
-      setPicks((current) => applyPick(initialBracket.matches, current, matchId, teamId, predictionNow));
+      setPicks(nextPicks);
       setPendingPick(null);
+    }
+
+    if (shouldSubmit) {
+      void submitRemotePrediction({
+        displayName: nextDisplayName,
+        picks: nextPicks,
+        started: true,
+      });
     }
   }
 
   function cancelNamePrompt() {
     setIsNamePromptOpen(false);
     setPendingPick(null);
+    setSubmitAfterName(false);
   }
 
   function changeViewMode(nextMode: BracketViewMode) {
@@ -305,6 +310,39 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
     }
 
     setViewMode(nextMode);
+  }
+
+  async function handleSubmitPrediction() {
+    setViewMode("predictions");
+    setSelectedPredictionId(OWN_PREDICTION_SOURCE_ID);
+
+    const cleanDisplayName = normalizeDisplayName(displayName);
+    if (!hasStartedPrediction || !cleanDisplayName) {
+      setSubmitAfterName(true);
+      openNamePrompt(null);
+      return;
+    }
+
+    await submitRemotePrediction({
+      displayName: cleanDisplayName,
+      picks,
+      started: true,
+    });
+  }
+
+  async function submitRemotePrediction(prediction: LocalPrediction) {
+    writeLocalPrediction(prediction);
+
+    if (!isSupabaseConfigured()) {
+      setRemotePersistenceAvailable(false);
+      setSubmitStatus("error");
+      return;
+    }
+
+    setSubmitStatus("saving");
+    const saved = await saveRemotePrediction(prediction);
+    setRemotePersistenceAvailable(saved);
+    setSubmitStatus(saved ? "saved" : "error");
   }
 
   const predictionNameControl = (
@@ -330,6 +368,20 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
           +
         </button>
       )}
+      <button
+        type="button"
+        className="prediction-submit-button"
+        disabled={submitStatus === "saving"}
+        title={remotePersistenceAvailable ? "Submit predictions" : "Remote submit unavailable"}
+        onClick={handleSubmitPrediction}
+      >
+        {submitStatus === "saving" ? "submitting" : submitStatus === "saved" ? "submitted" : "submit"}
+      </button>
+      {submitStatus === "error" ? (
+        <span className="prediction-submit-status" role="status">
+          failed
+        </span>
+      ) : null}
     </div>
   );
 
