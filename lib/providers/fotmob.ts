@@ -4,6 +4,7 @@ import { createWorldCup2026Bracket } from "@/lib/seed-data";
 import { makeTeam, slugifyTeamId } from "@/lib/teams";
 
 const FOTMOB_WORLD_CUP_URL = "https://www.fotmob.com/leagues/77/overview/world-cup";
+const FOTMOB_ORIGIN = "https://www.fotmob.com";
 
 const ROUND_ALIASES: Record<string, BracketRound> = {
   "1/16": "round-of-32",
@@ -49,7 +50,7 @@ export async function fetchWorldCupBracket(): Promise<BracketData> {
         "user-agent":
           "Mozilla/5.0 (compatible; WorldCupBracketVisualizer/0.1; +https://example.com)",
       },
-      next: { revalidate: 60 * 20 },
+      cache: "no-store",
     });
 
     if (!response.ok) {
@@ -58,7 +59,7 @@ export async function fetchWorldCupBracket(): Promise<BracketData> {
 
     const html = await response.text();
     const data = extractNextData(html);
-    const normalized = normalizeFotMobBracket(data);
+    const normalized = await enrichBracketWithMatchDetails(normalizeFotMobBracket(data));
     if (normalized.matches.length === 0) {
       throw new Error("No knockout matches found in FotMob payload");
     }
@@ -115,7 +116,7 @@ function normalizeMatchup(value: unknown, round: BracketRound, slot: number): Ma
   const awayTeam = normalizeTeam(value, "away");
   const homeScore = firstNumber(value, ["homeScore", "scoreHome", "homeTeamScore"]);
   const awayScore = firstNumber(value, ["awayScore", "scoreAway", "awayTeamScore"]);
-  const status = normalizeStatus(firstString(value, ["status", "statusText", "matchStatus"]));
+  const status = normalizeStatusFromValue(value.status) ?? normalizeStatus(firstString(value, ["statusText", "matchStatus"]));
   const winnerTeamId = normalizeWinnerId(value, homeTeam, awayTeam, homeScore, awayScore, status);
 
   return {
@@ -149,6 +150,9 @@ export function overlayBracketData(
       .filter((match) => typeof match.matchNumber === "number")
       .map((match) => [match.matchNumber, match]),
   );
+  const providerByRoundVisualSlot = new Map(
+    providerBracket.matches.map((match) => [roundVisualSlotKey(match.round, match.visualSlot ?? match.slot), match]),
+  );
 
   return {
     source,
@@ -156,7 +160,8 @@ export function overlayBracketData(
     matches: staticBracket.matches.map((staticMatch) => {
       const providerMatch =
         providerById.get(staticMatch.id) ??
-        (staticMatch.matchNumber ? providerByMatchNumber.get(staticMatch.matchNumber) : undefined);
+        (staticMatch.matchNumber ? providerByMatchNumber.get(staticMatch.matchNumber) : undefined) ??
+        providerByRoundVisualSlot.get(roundVisualSlotKey(staticMatch.round, staticMatch.visualSlot ?? staticMatch.slot));
 
       if (!providerMatch) return staticMatch;
 
@@ -165,8 +170,8 @@ export function overlayBracketData(
         providerId: providerMatch.providerId ?? staticMatch.providerId,
         kickoffTime: providerMatch.kickoffTime ?? staticMatch.kickoffTime,
         status: providerMatch.status === "unknown" ? staticMatch.status : providerMatch.status,
-        homeTeam: staticMatch.homeTeam ?? providerMatch.homeTeam,
-        awayTeam: staticMatch.awayTeam ?? providerMatch.awayTeam,
+        homeTeam: staticMatch.homeTeam ?? getConcreteProviderTeam(providerMatch, "home"),
+        awayTeam: staticMatch.awayTeam ?? getConcreteProviderTeam(providerMatch, "away"),
         homeScore: providerMatch.homeScore ?? staticMatch.homeScore,
         awayScore: providerMatch.awayScore ?? staticMatch.awayScore,
         winnerTeamId: mapProviderWinnerToStaticTeam(staticMatch, providerMatch),
@@ -179,6 +184,166 @@ export function overlayBracketData(
   };
 }
 
+async function enrichBracketWithMatchDetails(bracket: BracketData): Promise<BracketData> {
+  const matches = await Promise.all(bracket.matches.map(enrichMatchWithMatchDetails));
+  return { ...bracket, matches };
+}
+
+async function enrichMatchWithMatchDetails(match: Match): Promise<Match> {
+  const sourceMatch = getPrimaryFotMobMatch(match.providerData);
+  if (!sourceMatch || !shouldFetchMatchDetails(sourceMatch)) return match;
+
+  const pageUrl = firstString(sourceMatch, ["pageUrl"]);
+  if (!pageUrl) return match;
+
+  try {
+    const detail = await fetchFotMobMatchDetail(pageUrl);
+    if (!detail) return match;
+
+    return {
+      ...match,
+      kickoffTime: detail.kickoffTime ?? match.kickoffTime,
+      status: detail.status === "unknown" ? match.status : detail.status,
+      homeScore: detail.homeScore ?? match.homeScore,
+      awayScore: detail.awayScore ?? match.awayScore,
+      winnerTeamId: detail.winnerTeamId ?? match.winnerTeamId,
+      providerData: {
+        ...match.providerData,
+        matchDetail: detail.providerData,
+      },
+    };
+  } catch (error) {
+    console.warn("[football-provider] Could not enrich FotMob match detail", pageUrl, error);
+    return match;
+  }
+}
+
+async function fetchFotMobMatchDetail(pageUrl: string) {
+  const url = new URL(pageUrl.split("#")[0], FOTMOB_ORIGIN);
+  const response = await fetch(url, {
+    headers: {
+      accept: "text/html,application/xhtml+xml",
+      "user-agent":
+        "Mozilla/5.0 (compatible; WorldCupBracketVisualizer/0.1; +https://example.com)",
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`FotMob match detail returned ${response.status}`);
+  }
+
+  const payload = extractNextData(await response.text());
+  const pageProps = getRecord(getRecord(getRecord(payload)?.props)?.pageProps);
+  const general = getRecord(pageProps?.general);
+  const header = getRecord(pageProps?.header);
+  const teams = getArray(header?.teams);
+  const homeTeam = getRecord(teams?.[0]);
+  const awayTeam = getRecord(teams?.[1]);
+  const statusRecord = getRecord(header?.status);
+  const status = normalizeStatusRecord(statusRecord);
+  const homeScore = firstNumber(homeTeam ?? {}, ["score"]);
+  const awayScore = firstNumber(awayTeam ?? {}, ["score"]);
+  const penaltyShootout = extractPenaltyShootoutScore(pageProps);
+
+  return {
+    kickoffTime: firstString(statusRecord ?? {}, ["utcTime"]) ?? firstString(general ?? {}, ["matchTimeUTCDate"]),
+    status,
+    homeScore,
+    awayScore,
+    winnerTeamId: normalizeWinnerId(
+      {},
+      normalizeDetailTeam(homeTeam ?? getRecord(general?.homeTeam)),
+      normalizeDetailTeam(awayTeam ?? getRecord(general?.awayTeam)),
+      homeScore,
+      awayScore,
+      status,
+    ),
+    providerData: {
+      penaltyShootout,
+      general,
+      header: {
+        teams,
+        status: statusRecord,
+      },
+    },
+  };
+}
+
+function shouldFetchMatchDetails(sourceMatch: AnyRecord) {
+  const status = getRecord(sourceMatch.status);
+  return Boolean(status?.started || status?.finished || status?.ongoing);
+}
+
+function getPrimaryFotMobMatch(providerData: Record<string, unknown> | undefined) {
+  const matches = getArray(providerData?.matches);
+  return matches?.map(getRecord).find(Boolean) ?? null;
+}
+
+function normalizeDetailTeam(value: AnyRecord | null | undefined): Team | null {
+  if (!value) return null;
+
+  const name = firstString(value, ["name"]);
+  if (!name) return null;
+
+  const providerId = firstString(value, ["id"]);
+  return makeTeam({
+    id: providerId ? `team-${providerId}` : undefined,
+    name,
+    shortName: firstString(value, ["shortName", "name"]) ?? undefined,
+    providerId: providerId ?? undefined,
+  });
+}
+
+function normalizeStatusRecord(status: AnyRecord | null | undefined): MatchStatus {
+  if (!status) return "unknown";
+  if (status.cancelled) return "postponed";
+  if (status.finished) return "completed";
+  if (status.started || status.ongoing) return "live";
+  return "scheduled";
+}
+
+function roundVisualSlotKey(round: BracketRound, visualSlot: number) {
+  return `${round}:${visualSlot}`;
+}
+
+function extractPenaltyShootoutScore(pageProps: AnyRecord | null) {
+  const directScore = findDirectPenaltyShootoutScore(pageProps);
+  if (directScore) return directScore;
+
+  let shootoutScore: { homeScore: number; awayScore: number } | null = null;
+
+  walk(pageProps, (value) => {
+    if (!isRecord(value)) return;
+
+    const penShootoutScore = getArray(value.penShootoutScore);
+    if (!penShootoutScore || penShootoutScore.length < 2) return;
+
+    const homeScore = valueToNumber(penShootoutScore[0]);
+    const awayScore = valueToNumber(penShootoutScore[1]);
+    if (homeScore === null || awayScore === null) return;
+
+    shootoutScore = { homeScore, awayScore };
+  });
+
+  return shootoutScore;
+}
+
+function findDirectPenaltyShootoutScore(value: unknown): { homeScore: number; awayScore: number } | null {
+  if (!isRecord(value)) return null;
+
+  const homeScore = firstNumber(value, ["homePenaltyScore", "homePenalties", "penaltyHomeScore"]);
+  const awayScore = firstNumber(value, ["awayPenaltyScore", "awayPenalties", "penaltyAwayScore"]);
+  if (homeScore !== null && awayScore !== null) return { homeScore, awayScore };
+
+  for (const child of Object.values(value)) {
+    const score = findDirectPenaltyShootoutScore(child);
+    if (score) return score;
+  }
+
+  return null;
+}
+
 function mapProviderWinnerToStaticTeam(staticMatch: Match, providerMatch: Match) {
   if (!providerMatch.winnerTeamId) return staticMatch.winnerTeamId;
   if (providerMatch.winnerTeamId === providerMatch.homeTeam?.id) {
@@ -188,6 +353,18 @@ function mapProviderWinnerToStaticTeam(staticMatch: Match, providerMatch: Match)
     return staticMatch.awayTeam?.id ?? providerMatch.winnerTeamId;
   }
   return providerMatch.winnerTeamId;
+}
+
+function getConcreteProviderTeam(providerMatch: Match, side: "home" | "away") {
+  const team = side === "home" ? providerMatch.homeTeam : providerMatch.awayTeam;
+  if (!team) return null;
+
+  const providerData = providerMatch.providerData;
+  const tbdKey = side === "home" ? "tbdTeam1" : "tbdTeam2";
+  if (providerData?.[tbdKey]) return null;
+  if (team.shortName === "TBD" || team.name.includes("/")) return null;
+
+  return team;
 }
 
 function normalizeTeam(value: AnyRecord, side: "home" | "away"): Team | null {
@@ -208,6 +385,7 @@ function normalizeTeam(value: AnyRecord, side: "home" | "away"): Team | null {
   }
 
   const name = firstString(value, [
+    `${side}Team`,
     `${side}TeamName`,
     `${side}Name`,
     `${side}ShortName`,
@@ -226,6 +404,7 @@ function normalizeTeam(value: AnyRecord, side: "home" | "away"): Team | null {
   return makeTeam({
     id: providerId ? `team-${providerId}` : `team-${slugifyTeamId(name)}`,
     name,
+    shortName: firstString(value, [`${side}TeamShortName`, `${side}ShortName`, `${side}Name`]) ?? undefined,
     countryCode: countryCode ?? undefined,
     providerId: providerId ?? undefined,
   });
@@ -239,7 +418,7 @@ function normalizeWinnerId(
   awayScore: number | null,
   status: MatchStatus,
 ) {
-  const rawWinner = firstString(value, ["winnerTeamId", "winnerId", "winningTeamId"]);
+  const rawWinner = firstString(value, ["winnerTeamId", "winnerId", "winningTeamId", "aggregatedWinner", "winner"]);
   if (rawWinner) return `team-${rawWinner}`;
 
   const winnerSide = firstString(value, ["winner", "winningSide"])?.toLowerCase();
@@ -268,6 +447,16 @@ function normalizeStatus(status?: string | null): MatchStatus {
     return "scheduled";
   }
   return "unknown";
+}
+
+function normalizeStatusFromValue(value: unknown): MatchStatus | null {
+  if (typeof value === "string" || typeof value === "number") {
+    return normalizeStatus(String(value));
+  }
+  if (isRecord(value)) {
+    return normalizeStatusRecord(value);
+  }
+  return null;
 }
 
 function normalizeRound(roundRecord: AnyRecord, index: number, count: number): BracketRound | null {
@@ -313,6 +502,14 @@ function walk(value: unknown, visit: (value: unknown) => void, depth = 0) {
   }
 }
 
+function valueToNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) {
+    return Number(value);
+  }
+  return null;
+}
+
 function firstString(record: AnyRecord, keys: string[]): string | null {
   for (const key of keys) {
     const value = record[key];
@@ -335,6 +532,10 @@ function firstNumber(record: AnyRecord, keys: string[]): number | null {
 
 function getArray(value: unknown): unknown[] | null {
   return Array.isArray(value) ? value : null;
+}
+
+function getRecord(value: unknown): AnyRecord | null {
+  return isRecord(value) ? value : null;
 }
 
 function isRecord(value: unknown): value is AnyRecord {

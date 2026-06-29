@@ -1,6 +1,8 @@
 import { getBracketData, getPredictionRows } from "@/lib/bracket-store";
 import { computeLeaderboard } from "@/lib/bracket";
 
+export const dynamic = "force-dynamic";
+
 export default async function LeaderboardPage() {
   const [bracket, predictions] = await Promise.all([getBracketData(), getPredictionRows()]);
   const leaderboard = computeLeaderboard(bracket.matches, predictions);

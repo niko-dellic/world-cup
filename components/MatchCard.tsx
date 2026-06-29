@@ -4,6 +4,7 @@ import clsx from "clsx";
 import { Lock, Zap } from "lucide-react";
 import type { DisplayMatch, Team } from "@/lib/types";
 import { getSelectableTeams } from "@/lib/bracket";
+import { formatTeamScore } from "@/lib/match-score";
 
 type MatchCardProps = {
   match: DisplayMatch;
@@ -45,7 +46,7 @@ export function MatchCard({
       <div className="team-buttons">
         <TeamButton
           team={match.displayHomeTeam}
-          score={match.homeScore}
+          score={formatTeamScore(match, "home")}
           isSelected={selectedTeamId === match.displayHomeTeam?.id}
           isWinner={match.winnerTeamId === match.displayHomeTeam?.id}
           disabled={!canPick || !match.displayHomeTeam}
@@ -53,7 +54,7 @@ export function MatchCard({
         />
         <TeamButton
           team={match.displayAwayTeam}
-          score={match.awayScore}
+          score={formatTeamScore(match, "away")}
           isSelected={selectedTeamId === match.displayAwayTeam?.id}
           isWinner={match.winnerTeamId === match.displayAwayTeam?.id}
           disabled={!canPick || !match.displayAwayTeam}
@@ -73,7 +74,7 @@ function TeamButton({
   onPick,
 }: {
   team: Team | null;
-  score: number | null;
+  score: string | null;
   isSelected: boolean;
   isWinner: boolean;
   disabled: boolean;

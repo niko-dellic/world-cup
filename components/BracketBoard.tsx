@@ -12,6 +12,7 @@ import {
   getComparisonPickRole,
   type ComparisonSide,
 } from "@/lib/comparison";
+import { formatTeamScore } from "@/lib/match-score";
 import { getTeamPredictionOutcome } from "@/lib/prediction-outcome";
 import type { DisplayMatch, PredictionPicks, Team } from "@/lib/types";
 
@@ -229,6 +230,7 @@ function MatchupNode({
       <TeamPickButton
         match={match}
         team={match.displayHomeTeam}
+        side="home"
         predictionTeamId={predictionTeamId}
         selectedTeamId={selectedTeamId}
         comparisonSide={comparisonSide}
@@ -240,6 +242,7 @@ function MatchupNode({
       <TeamPickButton
         match={match}
         team={match.displayAwayTeam}
+        side="away"
         predictionTeamId={predictionTeamId}
         selectedTeamId={selectedTeamId}
         comparisonSide={comparisonSide}
@@ -255,6 +258,7 @@ function MatchupNode({
 function TeamPickButton({
   match,
   team,
+  side,
   predictionTeamId,
   selectedTeamId,
   comparisonSide,
@@ -265,6 +269,7 @@ function TeamPickButton({
 }: {
   match: DisplayMatch;
   team: Team | null;
+  side: "home" | "away";
   predictionTeamId: string | null;
   selectedTeamId: string | null;
   comparisonSide?: ComparisonSide;
@@ -289,7 +294,8 @@ function TeamPickButton({
     predictionTeamId,
     winnerTeamId: match.winnerTeamId,
   });
-  const teamLabel = team ? [team.name, outcome.label].filter(Boolean).join(", ") : "Unknown team";
+  const score = formatTeamScore(match, side);
+  const teamLabel = team ? [team.name, score ? `score ${score}` : null, outcome.label].filter(Boolean).join(", ") : "Unknown team";
 
   return (
     <button
@@ -309,18 +315,19 @@ function TeamPickButton({
       aria-label={teamLabel}
       title={teamLabel}
     >
-      {team ? <TeamToken team={team} /> : <span className="unknown-token">?</span>}
+      {team ? <TeamToken team={team} score={score} /> : <span className="unknown-token">?</span>}
     </button>
   );
 }
 
-function TeamToken({ team }: { team: Team }) {
+function TeamToken({ team, score }: { team: Team; score: string | null }) {
   return (
     <span className="team-token">
       <span className="team-token-flag" aria-hidden="true">
         {team.flagEmoji ?? "🏳"}
       </span>
       <span className="team-token-code">{team.shortName}</span>
+      {score ? <span className="team-token-score">{score}</span> : null}
     </span>
   );
 }

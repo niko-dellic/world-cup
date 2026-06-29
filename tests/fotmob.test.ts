@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { deriveDisplayMatches } from "@/lib/bracket";
 import { createSeedBracket } from "@/lib/seed-data";
 import { extractNextData, normalizeFotMobBracket, overlayBracketData } from "@/lib/providers/fotmob";
 
@@ -121,5 +122,45 @@ describe("FotMob provider normalization", () => {
     expect(updated.winnerTeamId).toBe("germany");
     expect(target.homeSourceMatchId).toBe("m74");
     expect(target.awaySourceMatchId).toBe("m77");
+  });
+
+  it("maps FotMob playoff draw order onto the static visual slot", () => {
+    const staticBracket = createSeedBracket("2026-06-29T00:00:00.000Z");
+    const providerBracket = normalizeFotMobBracket({
+      rounds: [
+        {
+          round: "1/16",
+          matchups: Array.from({ length: 9 }, (_, index) =>
+            index === 8
+              ? {
+                  homeTeamId: 8256,
+                  awayTeamId: 6715,
+                  homeTeam: "Brazil",
+                  awayTeam: "Japan",
+                  homeTeamShortName: "BRA",
+                  awayTeamShortName: "JPN",
+                  homeScore: 2,
+                  awayScore: 1,
+                  winner: 8256,
+                  status: { finished: true },
+                }
+              : { homeTeam: `Home ${index + 1}`, awayTeam: `Away ${index + 1}` },
+          ),
+        },
+      ],
+    });
+
+    const overlaid = overlayBracketData(staticBracket, providerBracket);
+    const display = deriveDisplayMatches(overlaid.matches, {});
+    const updated = overlaid.matches.find((match) => match.id === "m76")!;
+    const target = overlaid.matches.find((match) => match.id === "m91")!;
+    const displayTarget = display.find((match) => match.id === "m91")!;
+
+    expect(updated.status).toBe("completed");
+    expect(updated.homeScore).toBe(2);
+    expect(updated.awayScore).toBe(1);
+    expect(updated.winnerTeamId).toBe("brazil");
+    expect(target.homeSourceMatchId).toBe("m76");
+    expect(displayTarget.displayHomeTeam?.id).toBe("brazil");
   });
 });
