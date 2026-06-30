@@ -188,9 +188,16 @@ a {
 }
 
 .dashboard-shell {
+  --circle-bracket-size: min(calc(100vw - 64px), calc(100svh - 48px));
   display: block;
   height: 100svh;
   padding: clamp(12px, 1.4vw, 22px);
+}
+
+.dashboard-shell[data-layout-mode="circular"],
+.dashboard-shell[data-layout-mode="team-circular"] {
+  display: grid;
+  place-items: center;
 }
 
 .prediction-toolbar {
@@ -757,7 +764,7 @@ h1 {
 
 .terminal-bracket-circular {
   display: block;
-  width: min(100%, calc(100svh - 24px));
+  width: var(--circle-bracket-size);
   height: auto;
   aspect-ratio: 1;
   margin: 0 auto;
@@ -867,6 +874,13 @@ h1 {
   width: 100%;
   height: 100%;
   overflow: hidden;
+}
+
+.dashboard-shell[data-layout-mode="circular"] .comparison-bracket,
+.dashboard-shell[data-layout-mode="team-circular"] .comparison-bracket {
+  width: var(--circle-bracket-size);
+  height: var(--circle-bracket-size);
+  overflow: visible;
 }
 
 .comparison-bracket-slider {
@@ -1691,6 +1705,7 @@ h1 {
   }
 
   .dashboard-shell {
+    --circle-bracket-size: min(calc(100vw - 64px), calc(100svh - 112px));
     height: 100svh;
     padding: 8px 6px;
   }
@@ -1820,14 +1835,14 @@ h1 {
     gap: 3px;
   }
 
-  .terminal-bracket {
+  .dashboard-shell[data-layout-mode="symmetric"] .terminal-bracket {
     column-gap: 2px;
-    padding: 5px 2px;
+    padding: 5px 20px 5px 6px;
     font-size: 0.62rem;
   }
 
   .terminal-bracket-circular {
-    width: min(100%, calc(100svh - 18px));
+    width: var(--circle-bracket-size);
     padding: 0;
     font-size: clamp(0.45rem, 1.5vw, 0.62rem);
   }
@@ -1962,6 +1977,7 @@ h1 {
   }
 
   .home-page .dashboard-shell {
+    --circle-bracket-size: min(calc(100vw - 72px), calc(100svh - 138px));
     padding: 8px 4px;
   }
 
@@ -2011,13 +2027,13 @@ h1 {
     flex: 1 1 118px;
   }
 
-  .terminal-bracket {
-    padding: 44px 2px 4px;
+  .dashboard-shell[data-layout-mode="symmetric"] .terminal-bracket {
+    padding: 44px 24px 4px 6px;
     font-size: 0.58rem;
   }
 
   .terminal-bracket-circular {
-    width: min(100%, calc(100svh - 14px));
+    width: var(--circle-bracket-size);
     padding: 0;
     font-size: clamp(0.38rem, 1.85vw, 0.54rem);
   }

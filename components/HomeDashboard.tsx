@@ -389,7 +389,7 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
     <main className="home-page">
       <LiveFavicon active={hasLiveMatch} />
       <WorldCupScene activeMatch={activeMatch} />
-      <section className="dashboard-shell">
+      <section className="dashboard-shell" data-layout-mode={layoutMode} data-view-mode={viewMode}>
         <div className="prediction-toolbar">
           <div className="prediction-view-mode-control" aria-label="Bracket view">
             <span>view:</span>
