@@ -370,7 +370,7 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
       )}
       <button
         type="button"
-        className="prediction-submit-button"
+        className={`prediction-submit-button prediction-submit-button-${submitStatus}`}
         disabled={submitStatus === "saving"}
         title={remotePersistenceAvailable ? "Submit predictions" : "Remote submit unavailable"}
         onClick={handleSubmitPrediction}

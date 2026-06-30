@@ -298,22 +298,45 @@ a {
 }
 
 .prediction-submit-button {
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+  min-height: 1.75rem;
+  padding: 0 0.7rem;
+  border: 1px solid rgba(250, 204, 21, 0.78);
+  border-radius: 6px;
+  background: rgba(250, 204, 21, 0.12);
+  color: #facc15;
   cursor: pointer;
 }
 
 .prediction-submit-button:hover,
 .prediction-submit-button:focus-visible {
-  color: #20f7f7;
+  border-color: rgba(250, 204, 21, 0.98);
+  background: rgba(250, 204, 21, 0.2);
+  color: #fde047;
   outline: none;
 }
 
 .prediction-submit-button:disabled {
   cursor: wait;
   opacity: 0.7;
+}
+
+.prediction-submit-button-saved {
+  border-color: rgba(146, 255, 186, 0.82);
+  background: rgba(34, 197, 94, 0.16);
+  color: #92ffba;
+}
+
+.prediction-submit-button-saved:hover,
+.prediction-submit-button-saved:focus-visible {
+  border-color: rgba(146, 255, 186, 0.96);
+  background: rgba(34, 197, 94, 0.22);
+  color: #bbf7d0;
+}
+
+.prediction-submit-button-error {
+  border-color: rgba(255, 107, 127, 0.82);
+  background: rgba(255, 65, 92, 0.12);
+  color: #ff6b7f;
 }
 
 .prediction-submit-status {
@@ -1487,11 +1510,14 @@ h1 {
   flex-direction: column;
   justify-content: flex-start;
   width: min(760px, 100%);
-  min-height: 100svh;
+  height: 100svh;
+  min-height: 0;
   padding: clamp(28px, 6vw, 64px);
+  padding-bottom: 0;
 }
 
 .leaderboard-page {
+  height: 100svh;
   padding-top: 0;
   overflow: hidden;
   background: #000;
@@ -1503,6 +1529,7 @@ h1 {
 
 .leaderboard-topline {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: flex-start;
   gap: 10px;
@@ -1534,8 +1561,10 @@ h1 {
 
 .lofi-leaderboard {
   display: grid;
+  flex: 1 1 auto;
   gap: 0;
-  max-height: min(74svh, 620px);
+  align-content: start;
+  min-height: 0;
   padding: 0;
   overflow: auto;
   list-style: none;
@@ -1632,6 +1661,7 @@ h1 {
 
 .leaderboard-empty {
   display: block;
+  flex: 1 1 auto;
   min-height: 0;
   padding: 0;
   color: var(--muted);
