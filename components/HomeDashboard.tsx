@@ -71,6 +71,7 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
   const [predictionLoaded, setPredictionLoaded] = useState(false);
   const [remotePersistenceAvailable, setRemotePersistenceAvailable] = useState(isSupabaseConfigured);
   const [submitStatus, setSubmitStatus] = useState<SubmitStatus>("idle");
+  const [submitErrorMessage, setSubmitErrorMessage] = useState<string | null>(null);
   const [submitAfterName, setSubmitAfterName] = useState(false);
   const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
   const predictionNow = initialBracket.source === "seeded" ? SEEDED_DEMO_NOW : undefined;
@@ -189,6 +190,7 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
   useEffect(() => {
     if (!predictionLoaded) return;
     setSubmitStatus("idle");
+    setSubmitErrorMessage(null);
   }, [displayName, picks, predictionLoaded]);
 
   useEffect(() => {
@@ -336,13 +338,16 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
     if (!isSupabaseConfigured()) {
       setRemotePersistenceAvailable(false);
       setSubmitStatus("error");
+      setSubmitErrorMessage("Supabase is not configured.");
       return;
     }
 
     setSubmitStatus("saving");
-    const saved = await saveRemotePrediction(prediction);
-    setRemotePersistenceAvailable(saved);
-    setSubmitStatus(saved ? "saved" : "error");
+    setSubmitErrorMessage(null);
+    const result = await saveRemotePrediction(prediction);
+    setRemotePersistenceAvailable(result.ok);
+    setSubmitStatus(result.ok ? "saved" : "error");
+    setSubmitErrorMessage(result.ok ? null : result.error);
   }
 
   const predictionNameControl = (
@@ -378,8 +383,8 @@ export function HomeDashboard({ initialBracket }: { initialBracket: BracketData 
         {submitStatus === "saving" ? "submitting" : submitStatus === "saved" ? "submitted" : "submit"}
       </button>
       {submitStatus === "error" ? (
-        <span className="prediction-submit-status" role="status">
-          failed
+        <span className="prediction-submit-status" role="status" title={submitErrorMessage ?? undefined}>
+          {submitErrorMessage ? `failed: ${submitErrorMessage}` : "failed"}
         </span>
       ) : null}
     </div>
@@ -666,11 +671,13 @@ function normalizeDisplayName(value: string | null | undefined) {
 
 async function saveRemotePrediction(prediction: LocalPrediction) {
   const supabase = getBrowserSupabaseClient();
-  if (!supabase) return false;
+  if (!supabase) {
+    return { ok: false, error: "Supabase client is unavailable." };
+  }
 
   try {
-    const hasSession = await ensureAnonymousSession(supabase);
-    if (!hasSession) return false;
+    const sessionResult = await ensureAnonymousSession(supabase);
+    if (!sessionResult.ok) return sessionResult;
 
     const response = await fetch("/api/predictions", {
       method: "PUT",
@@ -680,10 +687,19 @@ async function saveRemotePrediction(prediction: LocalPrediction) {
       body: JSON.stringify(prediction),
     });
 
-    return response.ok;
-  } catch {
+    if (response.ok) return { ok: true, error: null };
+
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    return {
+      ok: false,
+      error: payload?.error ?? `Prediction save failed with status ${response.status}.`,
+    };
+  } catch (error) {
     // Local picks remain saved even when remote fantasy persistence is unavailable.
-    return false;
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Prediction save failed.",
+    };
   }
 }
 
@@ -693,9 +709,17 @@ async function ensureAnonymousSession(supabase: NonNullable<ReturnType<typeof ge
     error: sessionError,
   } = await supabase.auth.getSession();
 
-  if (sessionError) return false;
-  if (session) return true;
+  if (sessionError) {
+    return { ok: false, error: `Session check failed: ${sessionError.message}` };
+  }
+  if (session) return { ok: true, error: null };
 
   const { error } = await supabase.auth.signInAnonymously();
-  return !error;
+  if (!error) return { ok: true, error: null };
+
+  const status = "status" in error && typeof error.status === "number" ? ` (${error.status})` : "";
+  return {
+    ok: false,
+    error: `Anonymous sign-in failed${status}: ${error.message}`,
+  };
 }
